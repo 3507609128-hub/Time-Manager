@@ -1,0 +1,40 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Build output / intermediates
+x64/
+Time-Maneger/
+[Dd]ebug/
+[Rr]elease/
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.obj
+*.res
+*.tlog
+*.log
+*.lastbuildstate
+*.recipe
+*.exp
+*.lib
+
+# Runtime data (created next to the exe)
+tasks.dat
+settings.dat
+
+# Release packages
+*.zip
+*.7z
+*.rar
+
+# OS
+Thumbs.db
+desktop.ini
