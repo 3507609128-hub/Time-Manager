@@ -12,7 +12,9 @@
     5. 开机自启（写入注册表，后台最小化）、系统托盘常驻，关闭按钮最小化
        到托盘；
     6. 界面支持中文 / 日本語 / English 三种语言，可在设置中切换；
-    7. 日程与设置自动保存在程序目录（tasks.dat / settings.dat，UTF-8）。
+    7. 内置经典白 / 清新薄荷 / 奶油晨光 / 樱粉初雪四套界面风格，
+       默认清新薄荷，可在设置中随时替换；
+    8. 日程与设置自动保存在程序目录（tasks.dat / settings.dat，UTF-8）。
 
   编码约定：不使用 class / do-while / range-based for；
             任务、规则、通知槽位等数组下标一律从 1 开始。
@@ -69,6 +71,13 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define IDC_STATUS       1010
 #define IDC_STAT_TODAY   1011
 #define IDC_SEPARATOR    1012
+#define IDC_VIEW_MONTH   1013
+#define IDC_VIEW_WEEK    1014
+#define IDC_WEEK_PREV    1015
+#define IDC_WEEK_NEXT    1016
+#define IDC_WEEK_TODAY   1017
+#define IDC_WEEK_TITLE   1018
+#define IDC_WEEK         1019
 
 /* 添加日程窗口控件 ID */
 #define IDC_SDATE        2001
@@ -85,6 +94,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define IDC_RADD         2012
 #define IDC_RDEL         2013
 #define IDC_ADD_HINT     2014
+#define IDC_CAT          2015
 
 /* 设置窗口控件 ID */
 #define IDC_SET_AUTO     3001
@@ -100,6 +110,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define IDC_SET_HINT     3011
 #define IDC_SET_CREDITS  3012
 #define IDC_SET_EMAIL    3013
+#define IDC_SET_THEME    3014
 
 /* 托盘菜单 */
 #define ID_TRAY_SHOW     3101
@@ -116,6 +127,29 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define SOUND_BEEP       5
 #define SOUND_WAV        6
 
+/* 活动分类编号（下标从 1 开始） */
+#define CAT_COURSE       1
+#define CAT_CHORES       2
+#define CAT_WORK         3
+#define CAT_SPORT        4
+#define CAT_FUN          5
+#define CAT_OTHER        6
+#define CAT_COUNT        6
+#define CAT_DEFAULT      CAT_COURSE
+
+/* 视图模式：0=月视图（日历+列表），1=周视图（时间网格） */
+#define VIEW_MONTH       0
+#define VIEW_WEEK        1
+
+/* 周视图参数：全天 0:00–24:00 */
+#define WEEK_START_HOUR  0
+#define WEEK_END_HOUR    24
+#define WEEK_HOURS       (WEEK_END_HOUR - WEEK_START_HOUR)
+#define WEEK_HEADER_H    S(44)
+#define WEEK_AXIS_W      S(54)
+#define WEEK_ROW_H       S(52)
+#define WEEK_MAX_LANES   4
+
 /*============================= 数据结构 =============================*/
 
 struct Reminder
@@ -127,6 +161,7 @@ struct Reminder
 struct Task
 {
     int id;
+    int category;       /* 活动分类：1..CAT_COUNT */
     SYSTEMTIME stStart;
     SYSTEMTIME stEnd;
     wchar_t title[MAX_TITLE];
@@ -143,6 +178,7 @@ struct Settings
     int toastSec;       /* 通知停留秒数 */
     wchar_t wavPath[MAX_PATH];
     int lang;           /* 界面语言：LANG_ZH / LANG_JA / LANG_EN */
+    int theme;          /* 界面风格：THEME_* */
 };
 
 struct Toast
@@ -162,6 +198,105 @@ struct Toast
     wchar_t body2[200];
 };
 
+/*============================= 界面风格 =============================*/
+
+enum { THEME_CLASSIC = 0, THEME_MINT = 1, THEME_CREAM = 2, THEME_SAKURA = 3,
+       THEME_COUNT = 4, THEME_DEFAULT = THEME_MINT };
+
+struct Theme
+{
+    COLORREF page;          /* 页面底色 */
+    COLORREF card;          /* 卡片 / 列表 / 日历底色 */
+    COLORREF border;        /* 卡片边框 / 网格线 */
+    COLORREF text;          /* 主文字 */
+    COLORREF muted;         /* 次要文字 */
+    COLORREF accent;        /* 主强调色 */
+    COLORREF accentDark;    /* 强调色深色 */
+    COLORREF accentSoft;    /* 选中浅底 */
+    COLORREF hover;         /* 悬停 */
+    COLORREF today;         /* 今天虚线框 */
+    COLORREF sun;           /* 周日 */
+    COLORREF sat;           /* 周六 */
+    COLORREF weekendBg;     /* 周末列淡底 */
+    COLORREF nightBg;       /* 周视图夜间时段 */
+    COLORREF axisBg;        /* 周视图时间轴 / 表头 */
+    COLORREF altRow;        /* 列表交替行 */
+    COLORREF todayBg;       /* 周视图今天列 */
+    COLORREF line;          /* 周视图网格线 */
+    COLORREF now;           /* 当前时间线 */
+    COLORREF empty;         /* 空状态文字 */
+    COLORREF toastBg;       /* Toast 外框底 */
+    COLORREF toastBorder;   /* Toast 边框 */
+    COLORREF toastCard;     /* Toast 卡片 */
+    COLORREF toastTitle;    /* Toast 应用名 */
+    COLORREF toastHead;     /* Toast 标题 */
+    COLORREF toastBody;     /* Toast 正文 */
+    COLORREF tipBg;         /* 悬停气泡底 */
+    COLORREF tipText;       /* 悬停气泡主文字 */
+    COLORREF tipMuted;      /* 悬停气泡次要文字 */
+    COLORREF dialogBg;      /* 对话框底色 */
+};
+
+static const struct Theme g_themes[THEME_COUNT] =
+{
+    /* 0 经典白：与旧版配色保持一致 */
+    {
+        RGB(238, 242, 247), RGB(255, 255, 255), RGB(222, 228, 238),
+        RGB(38, 38, 38),    RGB(128, 128, 128), RGB(0, 120, 212),
+        RGB(0, 76, 140),    RGB(224, 238, 253), RGB(242, 246, 251),
+        RGB(224, 78, 26),   RGB(196, 64, 64),   RGB(64, 104, 176),
+        RGB(245, 246, 250), RGB(243, 246, 250), RGB(247, 249, 252),
+        RGB(247, 249, 252), RGB(238, 246, 255), RGB(228, 232, 238),
+        RGB(224, 78, 26),   RGB(160, 164, 170),
+        RGB(248, 249, 251), RGB(225, 226, 230), RGB(255, 255, 255),
+        RGB(140, 140, 140), RGB(28, 30, 34),    RGB(96, 100, 108),
+        RGB(255, 255, 255), RGB(30, 30, 30),    RGB(86, 86, 86),
+        RGB(240, 240, 240)
+    },
+    /* 1 清新薄荷：柔和薄荷页 + 青绿强调 + 珊瑚今日 */
+    {
+        RGB(241, 250, 246), RGB(255, 255, 255), RGB(216, 233, 225),
+        RGB(31, 56, 49),    RGB(110, 141, 131), RGB(42, 157, 130),
+        RGB(27, 116, 97),   RGB(221, 243, 235), RGB(233, 248, 242),
+        RGB(240, 138, 93),  RGB(217, 120, 104), RGB(79, 143, 166),
+        RGB(239, 249, 245), RGB(242, 250, 247), RGB(247, 252, 250),
+        RGB(247, 252, 250), RGB(230, 247, 241), RGB(220, 235, 228),
+        RGB(240, 138, 93),  RGB(154, 176, 168),
+        RGB(245, 252, 249), RGB(217, 235, 227), RGB(255, 255, 255),
+        RGB(126, 156, 146), RGB(22, 53, 44),    RGB(94, 126, 115),
+        RGB(255, 255, 255), RGB(30, 58, 50),    RGB(95, 127, 116),
+        RGB(242, 251, 247)
+    },
+    /* 2 奶油晨光：暖奶油页 + 琥珀强调 */
+    {
+        RGB(253, 248, 239), RGB(255, 255, 255), RGB(238, 223, 200),
+        RGB(63, 51, 38),    RGB(141, 123, 100), RGB(217, 144, 63),
+        RGB(163, 97, 30),   RGB(251, 235, 215), RGB(253, 243, 229),
+        RGB(217, 103, 74),  RGB(200, 107, 82),  RGB(111, 142, 110),
+        RGB(251, 244, 233), RGB(253, 248, 240), RGB(254, 250, 243),
+        RGB(254, 250, 243), RGB(252, 239, 224), RGB(240, 228, 210),
+        RGB(217, 103, 74),  RGB(179, 161, 139),
+        RGB(255, 251, 244), RGB(239, 225, 204), RGB(255, 255, 255),
+        RGB(160, 138, 112), RGB(59, 47, 35),    RGB(123, 105, 85),
+        RGB(255, 255, 255), RGB(62, 50, 37),    RGB(130, 111, 89),
+        RGB(254, 249, 241)
+    },
+    /* 3 樱粉初雪：淡粉页 + 玫红强调 */
+    {
+        RGB(255, 246, 249), RGB(255, 255, 255), RGB(242, 220, 229),
+        RGB(67, 49, 58),    RGB(148, 122, 134), RGB(217, 108, 146),
+        RGB(168, 70, 107),  RGB(251, 226, 236), RGB(255, 240, 245),
+        RGB(229, 138, 78),  RGB(217, 108, 122), RGB(138, 123, 184),
+        RGB(255, 243, 247), RGB(255, 247, 250), RGB(255, 250, 252),
+        RGB(255, 250, 252), RGB(252, 235, 242), RGB(244, 225, 232),
+        RGB(217, 108, 146), RGB(180, 154, 165),
+        RGB(255, 248, 251), RGB(244, 223, 231), RGB(255, 255, 255),
+        RGB(165, 139, 150), RGB(63, 46, 54),    RGB(133, 109, 120),
+        RGB(255, 255, 255), RGB(67, 49, 58),    RGB(140, 115, 126),
+        RGB(255, 248, 251)
+    }
+};
+
 /*============================= 全局变量 =============================*/
 
 static HINSTANCE g_hInst = NULL;
@@ -178,16 +313,32 @@ static HFONT  g_fontCal = NULL;
 static HFONT  g_fontCalBold = NULL;
 static HFONT  g_fontCalWeek = NULL;
 static HFONT  g_fontCalTitle = NULL;
+static HFONT  g_fontWeekHead = NULL;
+static HFONT  g_fontWeekAxis = NULL;
+static HFONT  g_fontWeekBlock = NULL;
+static HFONT  g_fontTipTitle = NULL;
+static HFONT  g_fontTipBody = NULL;
 static const wchar_t* g_fontFamily = L"Microsoft YaHei UI";
 static int    g_dpi = 96;
+static HBRUSH g_hBgBrush = NULL;    /* 主窗口页面底色 */
+static HBRUSH g_hDlgBrush = NULL;   /* 对话框底色 */
+static const struct Theme* g_theme = NULL;
 
 static HWND   g_hMain = NULL;
 static HWND   g_hList = NULL;
 static HWND   g_hCal = NULL;
+static HWND   g_hWeek = NULL;
+static HWND   g_hTip = NULL;
+static HWND   g_hTip2 = NULL;
 static HWND   g_hChkAuto = NULL;
 static HWND   g_hStatus = NULL;
 static HWND   g_hStatToday = NULL;
-static HWND   g_hTip = NULL;
+static HWND   g_hBtnViewMonth = NULL;
+static HWND   g_hBtnViewWeek = NULL;
+static HWND   g_hBtnWeekPrev = NULL;
+static HWND   g_hBtnWeekNext = NULL;
+static HWND   g_hBtnWeekToday = NULL;
+static HWND   g_hWeekTitle = NULL;
 
 static struct Task g_tasks[MAX_TASKS + 1];
 static int  g_count = 0;
@@ -212,9 +363,11 @@ static int  g_addResult = 0;
 static HWND g_dlgSDate = NULL, g_dlgSTime = NULL;
 static HWND g_dlgEDate = NULL, g_dlgETime = NULL;
 static HWND g_dlgTitle = NULL, g_dlgNote = NULL;
+static HWND g_dlgCat = NULL;
 static HWND g_dlgRList = NULL, g_dlgRValue = NULL, g_dlgRUnit = NULL;
 static int  g_dlgRMinutes[MAX_REMIND + 1];
 static int  g_dlgRCount = 0;
+static int  g_dlgCategory = CAT_DEFAULT;
 
 /* 设置窗口 */
 static HWND g_hSet = NULL;
@@ -233,6 +386,35 @@ static int g_calHoverNav = 0;       /* -1 上一月，1 下一月，0 无 */
 static int g_calTracking = 0;
 static SYSTEMTIME g_lastToday;      /* 用于检测跨天刷新 */
 static int g_lang = 0;              /* 当前界面语言，在语言区块中初始化 */
+
+/* 视图模式与周视图状态 */
+static int g_viewMode = VIEW_MONTH;
+static SYSTEMTIME g_weekAnchor;     /* 周视图锚定日期（所在周） */
+static int g_weekScroll = 0;        /* 周视图垂直滚动偏移（像素） */
+static int g_weekHoverTask = 0;     /* 周视图悬停的任务 id（0 表示无） */
+static int g_weekTracking = 0;
+static int g_weekSelId = 0;         /* 周视图单击选中的任务 id（用于删除） */
+
+/* 分类配色（下标 1..CAT_COUNT）：
+   g_catFill 为方块饱和色（配白字），g_catSoft 为月历浅色底（配深字） */
+static const COLORREF g_catFill[CAT_COUNT + 1] = {
+    0,
+    RGB(0x5B, 0x9B, 0xD5),  /* 1 课程 蓝 */
+    RGB(0x70, 0xAD, 0x47),  /* 2 家务 绿 */
+    RGB(0x9B, 0x7F, 0xD4),  /* 3 工作 紫 */
+    RGB(0xE8, 0x71, 0x8A),  /* 4 运动 红 */
+    RGB(0xF5, 0xA6, 0x23),  /* 5 娱乐 橙 */
+    RGB(0x9A, 0xA0, 0xA6)   /* 6 其他 灰 */
+};
+static const COLORREF g_catSoft[CAT_COUNT + 1] = {
+    0,
+    RGB(0xDA, 0xE9, 0xF8),  /* 1 课程 浅蓝 */
+    RGB(0xE2, 0xF0, 0xD9),  /* 2 家务 浅绿 */
+    RGB(0xEC, 0xE6, 0xF7),  /* 3 工作 浅紫 */
+    RGB(0xFB, 0xE3, 0xE8),  /* 4 运动 浅红 */
+    RGB(0xFD, 0xEF, 0xD3),  /* 5 娱乐 浅橙 */
+    RGB(0xEC, 0xEE, 0xEF)   /* 6 其他 浅灰 */
+};
 
 /* 默认提醒规则（分钟）：1 天、1 小时、30 分、5 分 */
 static const int DEFAULT_RULES[4] = { 1440, 60, 30, 5 };
@@ -262,7 +444,7 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(LIST_TITLE,      L"标题", L"タイトル", L"Title") \
     X(LIST_NOTE,       L"备注", L"メモ", L"Note") \
     X(LIST_REMIND,     L"提醒", L"通知", L"Remind") \
-    X(REMIND_COUNT,    L"%d 次", L"%d 回", L"%d×") \
+    X(REMIND_COUNT,    L"%d 次", L"%d 回", L"%d times") \
     X(STATUS_ALL,      L"共 %d 个日程    数据文件：%s", L"%d 件の予定    データ：%s", L"%d events    Data: %s") \
     X(STATUS_FILTER,   L"%s（%s）共 %d 个日程    点击「全部」显示所有日程", L"%s（%s）%d 件    「すべて」で全件表示", L"%s (%s): %d events    Click \"All\" to show everything") \
     X(TRAY_TIP,        L"时间管理器（后台运行中）", L"タイムマネージャー（バックグラウンド実行中）", L"Time-Manager (running in background)") \
@@ -301,6 +483,11 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(ERR_TITLE_EMPTY, L"请填写任务标题。", L"タイトルを入力してください。", L"Please enter a title.") \
     X(SET_TITLE,       L"设置", L"設定", L"Settings") \
     X(SET_LANG,        L"语言：", L"言語：", L"Language:") \
+    X(SET_THEME,       L"界面风格：", L"テーマ：", L"Theme:") \
+    X(THEME_CLASSIC,   L"经典白", L"クラシック", L"Classic") \
+    X(THEME_MINT,      L"清新薄荷", L"フレッシュミント", L"Fresh Mint") \
+    X(THEME_CREAM,     L"奶油晨光", L"クリームモーニング", L"Cream Morning") \
+    X(THEME_SAKURA,    L"樱粉初雪", L"サクラ", L"Sakura") \
     X(LANG_ZH,         L"中文", L"中文", L"中文") \
     X(LANG_JA,         L"日本語", L"日本語", L"日本語") \
     X(LANG_EN,         L"English", L"English", L"English") \
@@ -333,7 +520,29 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(NOW,             L"现在", L"今", L"now") \
     X(LEAD_DAY,        L"%d 天", L"%d日", L"%dd") \
     X(LEAD_HOUR,       L"%d 小时", L"%d時間", L"%dh") \
-    X(LEAD_MIN,        L"%d 分钟", L"%d分", L"%dm")
+    X(LEAD_MIN,        L"%d 分钟", L"%d分", L"%dm") \
+    X(LBL_CAT,         L"分类：", L"カテゴリー：", L"Category:") \
+    X(CAT_COURSE,      L"课程", L"授業", L"Course") \
+    X(CAT_CHORES,      L"家务", L"家事", L"Chores") \
+    X(CAT_WORK,        L"工作", L"仕事", L"Work") \
+    X(CAT_SPORT,       L"运动", L"運動", L"Sport") \
+    X(CAT_FUN,         L"娱乐", L"趣味", L"Leisure") \
+    X(CAT_OTHER,       L"其他", L"その他", L"Other") \
+    X(LIST_CAT,        L"分类", L"カテゴリー", L"Category") \
+    X(VIEW_MONTH,      L"月视图", L"月表示", L"Month") \
+    X(VIEW_WEEK,       L"周视图", L"週表示", L"Week") \
+    X(WEEK_PREV,       L"◀", L"◀", L"◀") \
+    X(WEEK_NEXT,       L"▶", L"▶", L"▶") \
+    X(WEEK_TODAY,      L"本周", L"今週", L"This week") \
+    X(WEEK_RANGE,      L"%d/%d – %d/%d", L"%d/%d – %d/%d", L"%d/%d – %d/%d") \
+    X(WEEK_NO_EVENT,   L"本周暂无日程", L"今週の予定はありません", L"No events this week") \
+    X(DAY_EVENT_COUNT, L"%d 个日程", L"%d 件の予定", L"%d events") \
+    X(TIP_CAT,         L"分类：%s", L"カテゴリー：%s", L"Category: %s") \
+    X(TIP_TIME,        L"%s %s – %s", L"%s %s – %s", L"%s %s – %s") \
+    X(TIP_REMIND,      L"提醒：%d 次", L"通知：%d 回", L"Reminders: %d") \
+    X(TIP_NOTE,        L"备注：%s", L"メモ：%s", L"Note: %s") \
+    X(TIP_MORE,        L"… 另外还有 %d 个日程", L"… 他 %d 件", L"… +%d more") \
+    X(TIP_EMPTY,       L"暂无日程", L"予定なし", L"No events")
 
 enum StrId
 {
@@ -445,6 +654,80 @@ static const wchar_t* SoundStr(int sound)
     return L"";
 }
 
+/* 分类名称（分类编号 1..CAT_COUNT） */
+static const wchar_t* CatStr(int cat)
+{
+    if (cat < 1 || cat > CAT_COUNT)
+    {
+        return Str(STR_CAT_OTHER);
+    }
+    return Str(STR_CAT_COURSE + cat - 1);
+}
+
+/* 界面风格名称 */
+static const wchar_t* ThemeStr(int theme)
+{
+    switch (theme)
+    {
+    case THEME_CLASSIC: return Str(STR_THEME_CLASSIC);
+    case THEME_MINT:    return Str(STR_THEME_MINT);
+    case THEME_CREAM:   return Str(STR_THEME_CREAM);
+    case THEME_SAKURA:  return Str(STR_THEME_SAKURA);
+    }
+    return Str(STR_THEME_MINT);
+}
+
+static ULONGLONG SysTimeToU64(const SYSTEMTIME* st);
+
+/* 判断两个日期是否相同 */
+static int SameDate(const SYSTEMTIME* a, const SYSTEMTIME* b)
+{
+    return a->wYear == b->wYear && a->wMonth == b->wMonth && a->wDay == b->wDay;
+}
+
+/* 日期加减整数天，结果写回 st */
+static void AddDays(SYSTEMTIME* st, int delta)
+{
+    FILETIME ft;
+    ULARGE_INTEGER u;
+    if (!SystemTimeToFileTime(st, &ft))
+    {
+        return;
+    }
+    u.LowPart = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    u.QuadPart += (LONGLONG)delta * 864000000000ULL;
+    ft.dwLowDateTime = u.LowPart;
+    ft.dwHighDateTime = u.HighPart;
+    FileTimeToSystemTime(&ft, st);
+}
+
+/* 取给定日期所在周的周一（中国习惯以周一为一周开始） */
+static void MondayOfDate(const SYSTEMTIME* date, SYSTEMTIME* monday)
+{
+    *monday = *date;
+    int dow = date->wDayOfWeek;     /* 0=周日 ... 6=周六 */
+    int delta = (dow == 0) ? -6 : (1 - dow);
+    AddDays(monday, delta);
+}
+
+/* 判断任务是否发生在给定日期（支持跨天任务） */
+static int TaskOnDate(const struct Task* t, int year, int month, int day)
+{
+    SYSTEMTIME d;
+    ZeroMemory(&d, sizeof(d));
+    d.wYear = (WORD)year;
+    d.wMonth = (WORD)month;
+    d.wDay = (WORD)day;
+    ULONGLONG s = SysTimeToU64(&t->stStart);
+    ULONGLONG e = SysTimeToU64(&t->stEnd);
+    ULONGLONG d0 = SysTimeToU64(&d);
+    SYSTEMTIME d2 = d;
+    AddDays(&d2, 1);
+    ULONGLONG d1 = SysTimeToU64(&d2);
+    return s < d1 && e > d0;
+}
+
 /*============================= 前向声明 =============================*/
 
 LRESULT CALLBACK MainWndProc(HWND, UINT, WPARAM, LPARAM);
@@ -452,8 +735,17 @@ LRESULT CALLBACK AddDlgProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK SetDlgProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK ToastProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK CalWndProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK WeekWndProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK TipWndProc(HWND, UINT, WPARAM, LPARAM);
 
+static ULONGLONG SysTimeToU64(const SYSTEMTIME* st);
 void RefreshList(void);
+void RefreshWeek(void);
+void RefreshCalendar(void);
+static void Main_OnSize(HWND hWnd, int W, int H);
+void ShowHoverTip(const wchar_t* text, const RECT* avoid, int firstBold, COLORREF accent);
+void HideHoverTip(void);
+void SetViewMode(int mode);
 void SaveTasks(void);
 void LoadTasks(void);
 void SaveSettings(void);
@@ -464,6 +756,7 @@ void QueueToast(const struct Task* t, int leadMinutes);
 void ShowAddDialog(void);
 void ShowSettingsDialog(void);
 void ApplyLanguage(void);
+void ApplyTheme(void);
 void CalSetDate(const SYSTEMTIME* st);
 static void CreateAppFonts(void);
 
@@ -487,11 +780,13 @@ static ULONGLONG SysTimeToU64(const SYSTEMTIME* st)
     return u.QuadPart;
 }
 
-static LONGLONG DiffMinutes(const SYSTEMTIME* now, const SYSTEMTIME* target)
+/* 返回 target 相对 now 的剩余秒数（未来为正、过去为负），秒级精度避免提前一分钟取整误差。
+   注意：必须先转成有符号整数再相减，否则过去时间会因无符号下溢变成巨大正数。 */
+static LONGLONG DiffSeconds(const SYSTEMTIME* now, const SYSTEMTIME* target)
 {
-    ULONGLONG a = SysTimeToU64(now);
-    ULONGLONG b = SysTimeToU64(target);
-    return (LONGLONG)((b - a) / 10000000ULL / 60ULL);
+    LONGLONG a = (LONGLONG)SysTimeToU64(now);
+    LONGLONG b = (LONGLONG)SysTimeToU64(target);
+    return (b - a) / 10000000LL;
 }
 
 static void FmtDate(const SYSTEMTIME* st, wchar_t* buf, int cch)
@@ -610,11 +905,13 @@ static HFONT MakeFont(int size, int bold)
 
 static void DestroyAppFonts(void)
 {
-    HFONT* fonts[10] = {
+    HFONT* fonts[16] = {
         &g_fontUi, &g_fontBold, &g_fontStatus, &g_fontTTitle, &g_fontTHead,
-        &g_fontTBody, &g_fontTI, &g_fontCal, &g_fontCalBold, &g_fontCalTitle
+        &g_fontTBody, &g_fontTI, &g_fontCal, &g_fontCalBold, &g_fontCalTitle,
+        &g_fontWeekHead, &g_fontWeekAxis, &g_fontWeekBlock,
+        &g_fontTipTitle, &g_fontTipBody
     };
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 15; i++)
     {
         if (*fonts[i] != NULL)
         {
@@ -646,18 +943,23 @@ static void CreateAppFonts(void)
     }
     DestroyAppFonts();
 
-    /* 字体尺寸比旧版整体调大：正文 11pt，辅助文字 10pt */
-    g_fontUi = MakeFont(11, FALSE);
-    g_fontBold = MakeFont(11, TRUE);
-    g_fontStatus = MakeFont(10, FALSE);
+    /* 字体整体调大：正文 12pt，日历数字 13pt，周视图方块 11pt */
+    g_fontUi = MakeFont(12, FALSE);
+    g_fontBold = MakeFont(12, TRUE);
+    g_fontStatus = MakeFont(11, FALSE);
     g_fontTTitle = MakeFont(10, FALSE);
     g_fontTHead = MakeFont(13, TRUE);
-    g_fontTBody = MakeFont(10, FALSE);
+    g_fontTBody = MakeFont(11, FALSE);
     g_fontTI = MakeFont(16, TRUE);
-    g_fontCal = MakeFont(11, FALSE);
-    g_fontCalBold = MakeFont(11, TRUE);
-    g_fontCalWeek = MakeFont(9, TRUE);
-    g_fontCalTitle = MakeFont(13, TRUE);
+    g_fontCal = MakeFont(13, FALSE);
+    g_fontCalBold = MakeFont(13, TRUE);
+    g_fontCalWeek = MakeFont(10, TRUE);
+    g_fontCalTitle = MakeFont(15, TRUE);
+    g_fontWeekHead = MakeFont(12, TRUE);
+    g_fontWeekAxis = MakeFont(10, FALSE);
+    g_fontWeekBlock = MakeFont(11, TRUE);
+    g_fontTipTitle = MakeFont(12, TRUE);
+    g_fontTipBody = MakeFont(11, FALSE);
 }
 
 /* 从 exe 资源加载应用图标，失败时退回系统图标 */
@@ -682,6 +984,7 @@ void LoadSettings(void)
     g_set.toastSec = 12;
     g_set.wavPath[0] = 0;
     g_set.lang = DetectSystemLang();
+    g_set.theme = THEME_DEFAULT;
 
     /* 注册表中的实际自启状态优先 */
     g_set.autostart = 0;
@@ -694,8 +997,8 @@ void LoadSettings(void)
     wchar_t line[MAX_PATH + 100];
     if (fgetws(line, MAX_PATH + 100, f) != NULL)
     {
-        wchar_t* parts[8];
-        int n = SplitLine(line, parts, 6);
+        wchar_t* parts[9];
+        int n = SplitLine(line, parts, 7);
         if (n >= 4)
         {
             g_set.autostart = _wtoi(parts[1]);
@@ -716,6 +1019,14 @@ void LoadSettings(void)
                     g_set.lang = lang;
                 }
             }
+            if (n >= 7)
+            {
+                int theme = _wtoi(parts[7]);
+                if (theme >= 0 && theme < THEME_COUNT)
+                {
+                    g_set.theme = theme;
+                }
+            }
         }
     }
     fclose(f);
@@ -731,9 +1042,9 @@ void SaveSettings(void)
     wchar_t wav[MAX_PATH];
     StringCchCopyW(wav, MAX_PATH, g_set.wavPath);
     CleanText(wav);
-    fwprintf(f, L"%d|%d|%d|%d|%s|%d\n",
+    fwprintf(f, L"%d|%d|%d|%d|%s|%d|%d\n",
         g_set.autostart, g_set.minStart, g_set.sound, g_set.toastSec,
-        wav[0] != 0 ? wav : L"", g_set.lang);
+        wav[0] != 0 ? wav : L"", g_set.lang, g_set.theme);
     fclose(f);
 }
 
@@ -850,37 +1161,50 @@ static void SortRules(struct Task* t)
   includeNearest=0：程序启动加载时，保留当前所处级别补响一次；
   includeNearest=1：新建任务时，已跨过的级别不再补响；
                     但提前 5 分钟以内的规则仍然保留（马上开始，最有价值）。
+  diffSec 为任务开始相对当前的剩余秒数。
+  返回值：是否有规则的 fired 状态被修改（供调用方决定是否落盘）。
 */
-static void NormalizeRules(struct Task* t, LONGLONG diff, int includeNearest)
+static int NormalizeRules(struct Task* t, LONGLONG diffSec, int includeNearest)
 {
-    if (diff < 0)
+    int changed = 0;
+    if (diffSec < 0)
     {
         for (int i = 1; i <= t->rcount; i++)
         {
-            t->r[i].fired = 1;
+            if (t->r[i].fired == 0)
+            {
+                t->r[i].fired = 1;
+                changed = 1;
+            }
         }
-        return;
+        return changed;
     }
     int nearest = 0;
     for (int i = 1; i <= t->rcount; i++)
     {
-        if (diff <= t->r[i].minutes)
+        if (diffSec <= (LONGLONG)t->r[i].minutes * 60)
         {
             nearest = i;   /* 规则已降序，最后一个满足的是最小分钟数 */
         }
     }
     if (nearest == 0)
     {
-        return;
+        return changed;
     }
     for (int i = 1; i < nearest; i++)
     {
-        t->r[i].fired = 1;
+        if (t->r[i].fired == 0)
+        {
+            t->r[i].fired = 1;
+            changed = 1;
+        }
     }
-    if (includeNearest && t->r[nearest].minutes > 5)
+    if (includeNearest && t->r[nearest].minutes > 5 && t->r[nearest].fired == 0)
     {
         t->r[nearest].fired = 1;
+        changed = 1;
     }
+    return changed;
 }
 
 void SaveTasks(void)
@@ -904,8 +1228,8 @@ void SaveTasks(void)
         CleanText(title);
         CleanText(note);
 
-        fwprintf(f, L"T|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%s|%s\n",
-            t->id,
+        fwprintf(f, L"T|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%s|%s\n",
+            t->id, t->category,
             t->stStart.wYear, t->stStart.wMonth, t->stStart.wDay,
             t->stStart.wHour, t->stStart.wMinute,
             t->stEnd.wYear, t->stEnd.wMonth, t->stEnd.wDay,
@@ -933,6 +1257,7 @@ static int LoadLegacyLine(wchar_t* line, struct Task* t)
     }
     ZeroMemory(t, sizeof(struct Task));
     t->id = _wtoi(parts[1]);
+    t->category = CAT_DEFAULT;
     t->stStart.wYear = (WORD)_wtoi(parts[2]);
     t->stStart.wMonth = (WORD)_wtoi(parts[3]);
     t->stStart.wDay = (WORD)_wtoi(parts[4]);
@@ -995,30 +1320,35 @@ void LoadTasks(void)
 
         if (line[0] == L'T' && line[1] == L'|')
         {
-            /* 新格式任务行：跳过开头的 "T|" 后按 13 个字段解析 */
+            /* 新格式任务行含 14 个字段（id、分类、11 个时间字段、标题、备注）；
+               早期版本为 13 个字段（无分类），读取时按字段数自适应。 */
             wchar_t* body = line + 2;
-            wchar_t* parts[16];
-            int n = SplitLine(body, parts, 13);
+            wchar_t* parts[18];
+            int n = SplitLine(body, parts, 14);
+            int hasCat = (n >= 14);
             if (n < 13)
             {
                 havePending = 0;
                 continue;
             }
+            int off = hasCat ? 1 : 0;     /* 新格式时间字段整体后移一位 */
             struct Task t;
             ZeroMemory(&t, sizeof(t));
+            t.category = hasCat ? _wtoi(parts[2]) : CAT_DEFAULT;
+            if (t.category < 1 || t.category > CAT_COUNT) { t.category = CAT_DEFAULT; }
             t.id = _wtoi(parts[1]);
-            t.stStart.wYear = (WORD)_wtoi(parts[2]);
-            t.stStart.wMonth = (WORD)_wtoi(parts[3]);
-            t.stStart.wDay = (WORD)_wtoi(parts[4]);
-            t.stStart.wHour = (WORD)_wtoi(parts[5]);
-            t.stStart.wMinute = (WORD)_wtoi(parts[6]);
-            t.stEnd.wYear = (WORD)_wtoi(parts[7]);
-            t.stEnd.wMonth = (WORD)_wtoi(parts[8]);
-            t.stEnd.wDay = (WORD)_wtoi(parts[9]);
-            t.stEnd.wHour = (WORD)_wtoi(parts[10]);
-            t.stEnd.wMinute = (WORD)_wtoi(parts[11]);
-            StringCchCopyW(t.title, MAX_TITLE, parts[12]);
-            StringCchCopyW(t.note, MAX_NOTE, parts[13]);
+            t.stStart.wYear = (WORD)_wtoi(parts[2 + off]);
+            t.stStart.wMonth = (WORD)_wtoi(parts[3 + off]);
+            t.stStart.wDay = (WORD)_wtoi(parts[4 + off]);
+            t.stStart.wHour = (WORD)_wtoi(parts[5 + off]);
+            t.stStart.wMinute = (WORD)_wtoi(parts[6 + off]);
+            t.stEnd.wYear = (WORD)_wtoi(parts[7 + off]);
+            t.stEnd.wMonth = (WORD)_wtoi(parts[8 + off]);
+            t.stEnd.wDay = (WORD)_wtoi(parts[9 + off]);
+            t.stEnd.wHour = (WORD)_wtoi(parts[10 + off]);
+            t.stEnd.wMinute = (WORD)_wtoi(parts[11 + off]);
+            StringCchCopyW(t.title, MAX_TITLE, parts[12 + off]);
+            StringCchCopyW(t.note, MAX_NOTE, parts[13 + off]);
             t.rcount = 0;
             index++;
             g_tasks[index] = t;
@@ -1072,11 +1402,20 @@ void LoadTasks(void)
 
     SYSTEMTIME now;
     GetLocalTime(&now);
+    int normChanged = 0;
     for (int i = 1; i <= g_count; i++)
     {
-        NormalizeRules(&g_tasks[i], DiffMinutes(&now, &g_tasks[i].stStart), 0);
+        if (NormalizeRules(&g_tasks[i], DiffSeconds(&now, &g_tasks[i].stStart), 0))
+        {
+            normChanged = 1;
+        }
     }
     SortTasks();
+    if (normChanged)
+    {
+        /* 启动时收敛掉的过期/已错过提醒立即落盘，保证文件状态一致 */
+        SaveTasks();
+    }
 }
 
 /*============================= 提醒检查 =============================*/
@@ -1090,10 +1429,11 @@ void CheckReminders(void)
     for (int i = 1; i <= g_count; i++)
     {
         struct Task* t = &g_tasks[i];
-        LONGLONG diff = DiffMinutes(&now, &t->stStart);
+        LONGLONG diffSec = DiffSeconds(&now, &t->stStart);
 
-        if (diff < 0)
+        if (diffSec < 0)
         {
+            /* 任务开始时间已过：所有未触发的提醒不再弹，标记已触发 */
             int need = 0;
             for (int k = 1; k <= t->rcount; k++)
             {
@@ -1112,7 +1452,8 @@ void CheckReminders(void)
 
         for (int k = 1; k <= t->rcount; k++)
         {
-            if (t->r[k].fired == 0 && diff <= t->r[k].minutes)
+            /* 精确到秒：进入“提前 N 分钟”窗口（剩余 <= N*60 秒）才触发 */
+            if (t->r[k].fired == 0 && diffSec <= (LONGLONG)t->r[k].minutes * 60)
             {
                 t->r[k].fired = 1;
                 changed = 1;
@@ -1188,14 +1529,14 @@ static void PaintToast(HWND h, struct Toast* t)
 
     RECT all;
     SetRect(&all, 0, 0, W, H);
-    HBRUSH white = CreateSolidBrush(RGB(248, 249, 251));
+    HBRUSH white = CreateSolidBrush(g_theme->toastBg);
     FillRect(mem, &all, white);
     DeleteObject(white);
 
     /* 细边框 */
-    HPEN border = CreatePen(PS_SOLID, 1, RGB(225, 226, 230));
+    HPEN border = CreatePen(PS_SOLID, 1, g_theme->toastBorder);
     HGDIOBJ oldPen = SelectObject(mem, border);
-    HBRUSH cardBrush = CreateSolidBrush(RGB(255, 255, 255));
+    HBRUSH cardBrush = CreateSolidBrush(g_theme->toastCard);
     HGDIOBJ oldBrush = SelectObject(mem, cardBrush);
     RoundRect(mem, 0, 0, W - 1, H - 1, S(12), S(12));
     SelectObject(mem, oldPen);
@@ -1204,14 +1545,14 @@ static void PaintToast(HWND h, struct Toast* t)
     DeleteObject(cardBrush);
 
     /* 左侧主色竖条 */
-    HBRUSH accent = CreateSolidBrush(RGB(0, 120, 212));
+    HBRUSH accent = CreateSolidBrush(g_theme->accent);
     RECT bar;
     SetRect(&bar, 0, S(10), S(4), H - S(10));
     FillRect(mem, &bar, accent);
     DeleteObject(accent);
 
-    /* 蓝色信息圆 + 白色 i */
-    HBRUSH blueBrush = CreateSolidBrush(RGB(0, 120, 212));
+    /* 主色信息圆 + 白色 i */
+    HBRUSH blueBrush = CreateSolidBrush(g_theme->accent);
     HGDIOBJ ob = SelectObject(mem, blueBrush);
     SelectObject(mem, GetStockObject(NULL_PEN));
     Ellipse(mem, S(20), S(30), S(48), S(58));
@@ -1227,21 +1568,21 @@ static void PaintToast(HWND h, struct Toast* t)
 
     /* 应用标题（小灰字） */
     SelectObject(mem, g_fontTTitle);
-    SetTextColor(mem, RGB(140, 140, 140));
+    SetTextColor(mem, g_theme->toastTitle);
     RECT rt;
     SetRect(&rt, S(60), S(8), W - S(34), S(18));
     DrawTextW(mem, Str(STR_TOAST_APP), -1, &rt, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     /* 粗体首行 */
     SelectObject(mem, g_fontTHead);
-    SetTextColor(mem, RGB(28, 30, 34));
+    SetTextColor(mem, g_theme->toastHead);
     RECT rh;
     SetRect(&rh, S(60), S(24), W - S(34), S(44));
     DrawTextW(mem, t->head, -1, &rh, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     /* 正文两行 */
     SelectObject(mem, g_fontTBody);
-    SetTextColor(mem, RGB(96, 100, 108));
+    SetTextColor(mem, g_theme->toastBody);
     RECT rb1;
     SetRect(&rb1, S(60), S(50), W - S(18), S(70));
     DrawTextW(mem, t->body1, -1, &rb1, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -1254,14 +1595,14 @@ static void PaintToast(HWND h, struct Toast* t)
     int closeY = S(4);
     if (t->closeHover)
     {
-        HBRUSH hv = CreateSolidBrush(RGB(235, 236, 240));
+        HBRUSH hv = CreateSolidBrush(g_theme->hover);
         HGDIOBJ o = SelectObject(mem, hv);
         SelectObject(mem, GetStockObject(NULL_PEN));
         Ellipse(mem, closeX, closeY, closeX + S(22), closeY + S(22));
         SelectObject(mem, o);
         DeleteObject(hv);
     }
-    HPEN xPen = CreatePen(PS_SOLID, 1, t->closeHover ? RGB(40, 40, 40) : RGB(150, 150, 150));
+    HPEN xPen = CreatePen(PS_SOLID, 1, t->closeHover ? g_theme->text : g_theme->muted);
     SelectObject(mem, xPen);
     int cx = closeX + S(7);
     int cy = closeY + S(7);
@@ -1569,20 +1910,21 @@ static int TaskOnFilter(const struct Task* t)
 
 static void SetColumnsWidth(int listWidth)
 {
-    int fixed = S(110) + S(80) + S(66) + S(66) + S(190) + S(88);
+    int fixed = S(96) + S(60) + S(50) + S(50) + S(72) + S(146) + S(60);
     int noteWidth = listWidth - fixed - S(24);
     if (noteWidth < S(70))
     {
         noteWidth = S(70);
     }
-    ListView_SetColumnWidth(g_hList, 0, S(110));
-    ListView_SetColumnWidth(g_hList, 1, S(80));
-    ListView_SetColumnWidth(g_hList, 2, S(66));
-    ListView_SetColumnWidth(g_hList, 3, S(66));
-    ListView_SetColumnWidth(g_hList, 4, S(190));
-    ListView_SetColumnWidth(g_hList, 5, noteWidth);
-    ListView_SetColumnWidth(g_hList, 6, S(88));
-    ListView_SetColumnWidth(g_hList, 7, 0);
+    ListView_SetColumnWidth(g_hList, 0, S(96));
+    ListView_SetColumnWidth(g_hList, 1, S(60));
+    ListView_SetColumnWidth(g_hList, 2, S(50));
+    ListView_SetColumnWidth(g_hList, 3, S(50));
+    ListView_SetColumnWidth(g_hList, 4, S(72));
+    ListView_SetColumnWidth(g_hList, 5, S(146));
+    ListView_SetColumnWidth(g_hList, 6, noteWidth);
+    ListView_SetColumnWidth(g_hList, 7, S(60));
+    ListView_SetColumnWidth(g_hList, 8, 0);
 }
 
 static void RefreshCalendar(void)
@@ -1635,10 +1977,11 @@ void RefreshList(void)
         ListView_SetItemText(g_hList, row, 1, (LPWSTR)g_weekFull[g_lang][t->stStart.wDayOfWeek]);
         ListView_SetItemText(g_hList, row, 2, tm1);
         ListView_SetItemText(g_hList, row, 3, tm2);
-        ListView_SetItemText(g_hList, row, 4, t->title);
-        ListView_SetItemText(g_hList, row, 5, t->note);
-        ListView_SetItemText(g_hList, row, 6, rc);
-        ListView_SetItemText(g_hList, row, 7, idStr);
+        ListView_SetItemText(g_hList, row, 4, (LPWSTR)CatStr(t->category));
+        ListView_SetItemText(g_hList, row, 5, t->title);
+        ListView_SetItemText(g_hList, row, 6, t->note);
+        ListView_SetItemText(g_hList, row, 7, rc);
+        ListView_SetItemText(g_hList, row, 8, idStr);
         row++;
         shown++;
     }
@@ -1672,20 +2015,37 @@ void RefreshList(void)
 
 void DeleteSelected(void)
 {
-    int sel = ListView_GetNextItem(g_hList, -1, LVNI_SELECTED);
-    if (sel < 0)
-    {
-        MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
-            Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
-        return;
-    }
+    int id = 0;
 
-    LVITEMW lvi;
-    ZeroMemory(&lvi, sizeof(lvi));
-    lvi.mask = LVIF_PARAM;
-    lvi.iItem = sel;
-    ListView_GetItem(g_hList, &lvi);
-    int id = (int)lvi.lParam;
+    if (g_viewMode == VIEW_WEEK)
+    {
+        /* 周视图：删除单击选中的方块 */
+        id = g_weekSelId;
+        if (id == 0)
+        {
+            MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
+                Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+    }
+    else
+    {
+        /* 月视图：删除列表选中行 */
+        int sel = ListView_GetNextItem(g_hList, -1, LVNI_SELECTED);
+        if (sel < 0)
+        {
+            MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
+                Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+
+        LVITEMW lvi;
+        ZeroMemory(&lvi, sizeof(lvi));
+        lvi.mask = LVIF_PARAM;
+        lvi.iItem = sel;
+        ListView_GetItem(g_hList, &lvi);
+        id = (int)lvi.lParam;
+    }
 
     int idx = 0;
     for (int i = 1; i <= g_count; i++)
@@ -1698,7 +2058,9 @@ void DeleteSelected(void)
     }
     if (idx == 0)
     {
+        g_weekSelId = 0;
         RefreshList();
+        RefreshWeek();
         return;
     }
 
@@ -1715,10 +2077,12 @@ void DeleteSelected(void)
         g_tasks[i] = g_tasks[i + 1];
     }
     g_count--;
+    if (g_weekSelId == id) { g_weekSelId = 0; }
 
     SaveTasks();
     RefreshList();
     RefreshCalendar();
+    RefreshWeek();
 }
 
 /*============================= “添加日程”窗口 =============================*/
@@ -1786,8 +2150,20 @@ static BOOL AddDlg_OnCreate(HWND hWnd)
     CreateLabel(hWnd, Str(STR_LBL_TITLE), S(16), S(100), S(80), S(28));
     g_dlgTitle = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        S(104), S(96), S(400), S(30), hWnd, (HMENU)(LONG_PTR)IDC_TITLE, g_hInst, NULL);
+        S(104), S(96), S(184), S(30), hWnd, (HMENU)(LONG_PTR)IDC_TITLE, g_hInst, NULL);
     SendMessageW(g_dlgTitle, EM_SETLIMITTEXT, (WPARAM)(MAX_TITLE - 1), 0);
+
+    CreateLabel(hWnd, Str(STR_LBL_CAT), S(298), S(100), S(56), S(28));
+    g_dlgCat = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        S(356), S(96), S(148), S(260),
+        hWnd, (HMENU)(LONG_PTR)IDC_CAT, g_hInst, NULL);
+    for (int c = 1; c <= CAT_COUNT; c++)
+    {
+        SendMessageW(g_dlgCat, CB_ADDSTRING, 0, (LPARAM)CatStr(c));
+        SendMessageW(g_dlgCat, CB_SETITEMDATA, (WPARAM)(c - 1), (LPARAM)c);
+    }
+    SendMessageW(g_dlgCat, CB_SETCURSEL, g_dlgCategory - 1, 0);
 
     CreateLabel(hWnd, Str(STR_LBL_NOTE), S(16), S(142), S(80), S(24));
     g_dlgNote = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
@@ -1986,6 +2362,14 @@ static void OnAddOk(HWND hWnd)
     CleanText(t.title);
     CleanText(t.note);
 
+    int catSel = (int)SendMessageW(g_dlgCat, CB_GETCURSEL, 0, 0);
+    t.category = CAT_DEFAULT;
+    if (catSel >= 0 && catSel < CAT_COUNT)
+    {
+        t.category = (int)SendMessageW(g_dlgCat, CB_GETITEMDATA, (WPARAM)catSel, 0);
+        if (t.category < 1 || t.category > CAT_COUNT) { t.category = CAT_DEFAULT; }
+    }
+
     t.id = g_nextId;
     g_nextId++;
     t.rcount = g_dlgRCount;
@@ -1998,7 +2382,7 @@ static void OnAddOk(HWND hWnd)
 
     SYSTEMTIME now;
     GetLocalTime(&now);
-    NormalizeRules(&t, DiffMinutes(&now, &t.stStart), 1);
+    NormalizeRules(&t, DiffSeconds(&now, &t.stStart), 1);
 
     g_count++;
     g_tasks[g_count] = t;
@@ -2006,6 +2390,7 @@ static void OnAddOk(HWND hWnd)
     SaveTasks();
     RefreshList();
     RefreshCalendar();
+    RefreshWeek();
 
     g_addResult = IDOK;
 }
@@ -2018,10 +2403,28 @@ LRESULT CALLBACK AddDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         AddDlg_OnCreate(hWnd);
         return 0;
 
+    case WM_ERASEBKGND:
+    {
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        FillRect((HDC)wParam, &rc, g_hDlgBrush);
+        return 1;
+    }
+
     case WM_CTLCOLORSTATIC:
+    {
+        int id = GetDlgCtrlID((HWND)lParam);
         SetBkMode((HDC)wParam, TRANSPARENT);
-        SetTextColor((HDC)wParam, GetSysColor(COLOR_WINDOWTEXT));
-        return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+        if (id == IDC_ADD_HINT)
+        {
+            SetTextColor((HDC)wParam, g_theme->muted);
+        }
+        else
+        {
+            SetTextColor((HDC)wParam, g_theme->text);
+        }
+        return (LRESULT)g_hDlgBrush;
+    }
 
     case WM_COMMAND:
         switch (LOWORD(wParam))
@@ -2052,6 +2455,7 @@ LRESULT CALLBACK AddDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 void ShowAddDialog(void)
 {
     g_addResult = 0;
+    g_dlgCategory = CAT_DEFAULT;
 
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     DWORD exStyle = WS_EX_DLGMODALFRAME;
@@ -2135,24 +2539,40 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
     }
     SendMessageW(hLang, CB_SETCURSEL, g_dlgSet.lang, 0);
 
+    /* 界面风格 */
+    CreateLabel(hWnd, Str(STR_SET_THEME), S(16), S(56), S(100), S(28));
+    HWND hTheme = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        S(120), S(52), S(260), S(260),
+        hWnd, (HMENU)(LONG_PTR)IDC_SET_THEME, g_hInst, NULL);
+    for (int i = 0; i < THEME_COUNT; i++)
+    {
+        SendMessageW(hTheme, CB_ADDSTRING, 0, (LPARAM)ThemeStr(i));
+    }
+    if (g_dlgSet.theme < 0 || g_dlgSet.theme >= THEME_COUNT)
+    {
+        g_dlgSet.theme = THEME_DEFAULT;
+    }
+    SendMessageW(hTheme, CB_SETCURSEL, g_dlgSet.theme, 0);
+
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_AUTOSTART),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        S(16), S(54), S(480), S(28),
+        S(16), S(88), S(480), S(28),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_AUTO, g_hInst, NULL);
     Button_SetCheck(GetDlgItem(hWnd, IDC_SET_AUTO),
         g_dlgSet.autostart ? BST_CHECKED : BST_UNCHECKED);
 
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_MINSTART),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        S(16), S(86), S(480), S(28),
+        S(16), S(120), S(480), S(28),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_MIN, g_hInst, NULL);
     Button_SetCheck(GetDlgItem(hWnd, IDC_SET_MIN),
         g_dlgSet.minStart ? BST_CHECKED : BST_UNCHECKED);
 
-    CreateLabel(hWnd, Str(STR_SET_DURATION), S(16), S(124), S(130), S(28));
+    CreateLabel(hWnd, Str(STR_SET_DURATION), S(16), S(158), S(130), S(28));
     HWND hDur = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(150), S(120), S(110), S(260),
+        S(150), S(154), S(110), S(260),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_DUR, g_hInst, NULL);
     const int durList[6] = { 8, 10, 12, 15, 20, 30 };
     for (int i = 0; i < 6; i++)
@@ -2170,10 +2590,10 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
         SendMessageW(hDur, CB_SETCURSEL, 2, 0);
     }
 
-    CreateLabel(hWnd, Str(STR_SET_SOUND), S(16), S(160), S(130), S(28));
+    CreateLabel(hWnd, Str(STR_SET_SOUND), S(16), S(194), S(130), S(28));
     HWND hSound = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(150), S(156), S(200), S(260),
+        S(150), S(190), S(200), S(260),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_SOUND, g_hInst, NULL);
     for (int i = 0; i <= SOUND_WAV; i++)
     {
@@ -2187,39 +2607,39 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
 
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_TEST),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(362), S(154), S(90), S(32),
+        S(362), S(188), S(90), S(32),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_TEST, g_hInst, NULL);
 
-    CreateLabel(hWnd, Str(STR_SET_WAV), S(16), S(196), S(130), S(28));
+    CreateLabel(hWnd, Str(STR_SET_WAV), S(16), S(230), S(130), S(28));
     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_dlgSet.wavPath,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        S(16), S(224), S(400), S(30),
+        S(16), S(258), S(400), S(30),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_WAV, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_BROWSE),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(424), S(222), S(80), S(32),
+        S(424), S(256), S(80), S(32),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_BROWSE, g_hInst, NULL);
 
-    CreateHint(hWnd, Str(STR_SET_HINT), S(16), S(264), S(488), S(46), IDC_SET_HINT);
+    CreateHint(hWnd, Str(STR_SET_HINT), S(16), S(298), S(488), S(46), IDC_SET_HINT);
 
     CreateWindowExW(0, L"BUTTON", Str(STR_OK),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-        S(300), S(326), S(100), S(34),
+        S(300), S(360), S(100), S(34),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_OK, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_CANCEL),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(408), S(326), S(100), S(34),
+        S(408), S(360), S(100), S(34),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_CANCEL, g_hInst, NULL);
 
     /* 分隔线 + 制作人员 / 联系邮箱 */
     CreateWindowExW(0, L"STATIC", L"",
         WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-        S(16), S(376), S(488), 1,
+        S(16), S(410), S(488), 1,
         hWnd, (HMENU)(LONG_PTR)IDC_SEPARATOR, g_hInst, NULL);
 
     CreateWindowExW(0, L"STATIC", Str(STR_CREDITS_AUTHOR),
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        S(16), S(384), S(488), S(22),
+        S(16), S(418), S(488), S(22),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_CREDITS, g_hInst, NULL);
 
     wchar_t emailText[256];
@@ -2227,7 +2647,7 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
         L"3507609128@qq.com", L"3507609128@qq.com");
     CreateWindowExW(0, WC_LINK, emailText,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        S(16), S(408), S(488), S(24),
+        S(16), S(442), S(488), S(24),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_EMAIL, g_hInst, NULL);
 
     EnumChildWindows(hWnd, SetFontToChild, (LPARAM)g_fontUi);
@@ -2323,6 +2743,7 @@ static void OnSetOk(HWND hWnd)
     int sound = (int)SendMessageW(GetDlgItem(hWnd, IDC_SET_SOUND), CB_GETCURSEL, 0, 0);
     int durIdx = (int)SendMessageW(GetDlgItem(hWnd, IDC_SET_DUR), CB_GETCURSEL, 0, 0);
     int langIdx = (int)SendMessageW(GetDlgItem(hWnd, IDC_SET_LANG), CB_GETCURSEL, 0, 0);
+    int themeIdx = (int)SendMessageW(GetDlgItem(hWnd, IDC_SET_THEME), CB_GETCURSEL, 0, 0);
     const int durList[6] = { 8, 10, 12, 15, 20, 30 };
     int autoRun = Button_GetCheck(GetDlgItem(hWnd, IDC_SET_AUTO)) == BST_CHECKED;
     int minStart = Button_GetCheck(GetDlgItem(hWnd, IDC_SET_MIN)) == BST_CHECKED;
@@ -2333,12 +2754,14 @@ static void OnSetOk(HWND hWnd)
     if (durIdx < 0) { durIdx = 2; }
     if (sound < 0) { sound = SOUND_ASTERISK; }
     if (langIdx < 0 || langIdx >= LANG_COUNT) { langIdx = g_dlgSet.lang; }
+    if (themeIdx < 0 || themeIdx >= THEME_COUNT) { themeIdx = g_dlgSet.theme; }
 
     g_set.autostart = autoRun;
     g_set.minStart = minStart;
     g_set.sound = sound;
     g_set.toastSec = durList[durIdx];
     g_set.lang = langIdx;
+    g_set.theme = themeIdx;
     StringCchCopyW(g_set.wavPath, MAX_PATH, wav);
     CleanText(g_set.wavPath);
 
@@ -2360,19 +2783,27 @@ LRESULT CALLBACK SetDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         SetDlg_OnCreate(hWnd);
         return 0;
 
+    case WM_ERASEBKGND:
+    {
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        FillRect((HDC)wParam, &rc, g_hDlgBrush);
+        return 1;
+    }
+
     case WM_CTLCOLORSTATIC:
     {
         int id = GetDlgCtrlID((HWND)lParam);
         SetBkMode((HDC)wParam, TRANSPARENT);
-        if (id == IDC_SET_CREDITS)
+        if (id == IDC_SET_CREDITS || id == IDC_SET_HINT)
         {
-            SetTextColor((HDC)wParam, RGB(105, 105, 105));
+            SetTextColor((HDC)wParam, g_theme->muted);
         }
         else
         {
-            SetTextColor((HDC)wParam, GetSysColor(COLOR_WINDOWTEXT));
+            SetTextColor((HDC)wParam, g_theme->text);
         }
-        return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+        return (LRESULT)g_hDlgBrush;
     }
 
     case WM_NOTIFY:
@@ -2417,11 +2848,12 @@ void ShowSettingsDialog(void)
 {
     g_setResult = 0;
     int oldLang = g_set.lang;
+    int oldTheme = g_set.theme;
 
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     DWORD exStyle = WS_EX_DLGMODALFRAME;
     RECT wr;
-    SetRect(&wr, 0, 0, S(520), S(436));
+    SetRect(&wr, 0, 0, S(520), S(476));
     AdjustWindowRectEx(&wr, style, FALSE, exStyle);
 
     g_hSet = CreateWindowExW(
@@ -2483,25 +2915,37 @@ void ShowSettingsDialog(void)
     {
         ApplyLanguage();
     }
+    if (g_set.theme != oldTheme)
+    {
+        ApplyTheme();
+    }
 }
 
 /*============================= 自绘日历 =============================*/
 
-#define CAL_HEADER_H S(36)
-#define CAL_WEEK_H   S(26)
-#define CAL_CELL_H   S(30)
-#define CAL_WIDTH    S(240)
+#define CAL_HEADER_H S(42)
+#define CAL_WEEK_H   S(28)
+#define CAL_CELL_H   S(46)
+#define CAL_WIDTH    S(356)
 #define CAL_HEIGHT   (CAL_HEADER_H + CAL_WEEK_H + CAL_CELL_H * 6)
 
-#define CAL_ACCENT      RGB(0, 120, 212)
-#define CAL_ACCENT_DARK RGB(0, 76, 140)
-#define CAL_TODAY       RGB(224, 78, 26)
-#define CAL_TEXT        RGB(32, 32, 32)
-#define CAL_MUTED       RGB(128, 128, 128)
-#define CAL_HOVER       RGB(242, 246, 251)
-#define CAL_SEL_BG      RGB(224, 238, 253)
-#define CAL_SUN         RGB(196, 64, 64)
-#define CAL_SAT         RGB(64, 104, 176)
+#define CAL_ACCENT      (g_theme->accent)
+#define CAL_ACCENT_DARK (g_theme->accentDark)
+#define CAL_TODAY       (g_theme->today)
+#define CAL_TEXT        (g_theme->text)
+#define CAL_MUTED       (g_theme->muted)
+#define CAL_HOVER       (g_theme->hover)
+#define CAL_SEL_BG      (g_theme->accentSoft)
+#define CAL_SUN         (g_theme->sun)
+#define CAL_SAT         (g_theme->sat)
+
+/* 当前主题的统一配色 */
+#define BG_PAGE         (g_theme->page)
+#define CARD_BORDER     (g_theme->border)
+#define WEEK_BG_WEEKEND (g_theme->weekendBg)
+#define WEEK_BG_NIGHT   (g_theme->nightBg)
+#define WEEK_BG_AXIS    (g_theme->axisBg)
+#define LIST_BG_ALT     (g_theme->altRow)
 
 struct CalLayout
 {
@@ -2543,18 +2987,53 @@ static int FirstWeekday(int year, int month)
     return st.wDayOfWeek;
 }
 
-static int HasTasksOnDate(int year, int month, int day)
+/* 收集某天所有活动涉及的分类（去重，最多 max 个），返回分类数量 */
+static int DayCategories(int year, int month, int day, int cats[], int max)
 {
+    int n = 0;
     for (int i = 1; i <= g_count; i++)
     {
         if (g_tasks[i].stStart.wYear == year &&
             g_tasks[i].stStart.wMonth == month &&
             g_tasks[i].stStart.wDay == day)
         {
-            return 1;
+            int c = g_tasks[i].category;
+            if (c < 1 || c > CAT_COUNT) { c = CAT_OTHER; }
+            int exist = 0;
+            for (int k = 0; k < n; k++)
+            {
+                if (cats[k] == c) { exist = 1; break; }
+            }
+            if (!exist && n < max)
+            {
+                cats[n] = c;
+                n++;
+            }
         }
     }
-    return 0;
+    return n;
+}
+
+/* 统计某天活动数量 */
+static int DayTaskCount(int year, int month, int day)
+{
+    int n = 0;
+    for (int i = 1; i <= g_count; i++)
+    {
+        if (g_tasks[i].stStart.wYear == year &&
+            g_tasks[i].stStart.wMonth == month &&
+            g_tasks[i].stStart.wDay == day)
+        {
+            n++;
+        }
+    }
+    return n;
+}
+
+static int HasTasksOnDate(int year, int month, int day)
+{
+    int cats[4];
+    return DayCategories(year, month, day, cats, 4) > 0;
 }
 
 static void CalGetLayout(HWND h, struct CalLayout* L)
@@ -2656,6 +3135,46 @@ static void DrawDashedRoundRect(HDC hdc, const RECT* rc, COLORREF color, int ins
     DeleteObject(pen);
 }
 
+/* 实线圆角描边（用于选中状态） */
+static void DrawRoundBorder(HDC hdc, const RECT* rc, COLORREF color, int inset)
+{
+    RECT r = *rc;
+    InflateRect(&r, -inset, -inset);
+    int width = S(2);
+    if (width < 1)
+    {
+        width = 1;
+    }
+    LOGBRUSH lb;
+    lb.lbStyle = BS_SOLID;
+    lb.lbColor = color;
+    lb.lbHatch = 0;
+    HPEN pen = ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND,
+        (DWORD)width, &lb, 0, NULL);
+    if (pen == NULL)
+    {
+        pen = CreatePen(PS_SOLID, 1, color);
+    }
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, r.left, r.top, r.right, r.bottom, S(8), S(8));
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(pen);
+}
+
+/* 画实心圆点 */
+static void FillDot(HDC hdc, int cx, int cy, int radius, COLORREF color)
+{
+    HBRUSH br = CreateSolidBrush(color);
+    HGDIOBJ oldBrush = SelectObject(hdc, br);
+    HGDIOBJ oldPen = SelectObject(hdc, GetStockObject(NULL_PEN));
+    Ellipse(hdc, cx - radius, cy - radius, cx + radius, cy + radius);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(br);
+}
+
 static void CalPaint(HWND h)
 {
     PAINTSTRUCT ps;
@@ -2675,9 +3194,21 @@ static void CalPaint(HWND h)
 
     RECT all;
     SetRect(&all, 0, 0, L.W, L.H);
-    HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
+    HBRUSH white = CreateSolidBrush(g_theme->card);
     FillRect(mem, &all, white);
     DeleteObject(white);
+
+    /* 卡片边框 + 星期表头淡底 */
+    {
+        HBRUSH cb = CreateSolidBrush(CARD_BORDER);
+        FrameRect(mem, &all, cb);
+        DeleteObject(cb);
+        HBRUSH wh = CreateSolidBrush(WEEK_BG_AXIS);
+        RECT wband;
+        SetRect(&wband, 0, CAL_HEADER_H, L.W, CAL_HEADER_H + CAL_WEEK_H);
+        FillRect(mem, &wband, wh);
+        DeleteObject(wh);
+    }
 
     SetBkMode(mem, TRANSPARENT);
 
@@ -2744,21 +3275,24 @@ static void CalPaint(HWND h)
             SetRect(&cell, L.pad + col * L.cellW, L.gridTop + row * L.cellH,
                 L.pad + (col + 1) * L.cellW, L.gridTop + (row + 1) * L.cellH);
 
-            int hasTask = HasTasksOnDate(g_calYear, g_calMonth, day);
+            int cats[4];
+            int ncat = DayCategories(g_calYear, g_calMonth, day, cats, 4);
+            int hasTask = (ncat > 0);
             int selected = (g_calSel.wYear == g_calYear &&
                             g_calSel.wMonth == g_calMonth &&
                             g_calSel.wDay == day);
             int hover = (g_calHoverDay == day);
 
             RECT inner = cell;
-            InflateRect(&inner, -S(3), -S(2));
+            InflateRect(&inner, -S(3), -S(3));
 
             COLORREF textColor = CAL_TEXT;
             HFONT font = g_fontCal;
             if (hasTask)
             {
-                FillRoundedRect(mem, &inner, CAL_ACCENT);
-                textColor = RGB(255, 255, 255);
+                /* 有活动的日期用当天首个分类的浅色底 */
+                FillRoundedRect(mem, &inner, g_catSoft[cats[0]]);
+                textColor = g_theme->text;
                 font = g_fontCalBold;
             }
             else if (selected)
@@ -2771,6 +3305,16 @@ static void CalPaint(HWND h)
             {
                 FillRoundedRect(mem, &inner, CAL_HOVER);
             }
+            else if (col == 0 || col == 6)
+            {
+                /* 周末列淡色底 */
+                FillRoundedRect(mem, &inner, WEEK_BG_WEEKEND);
+            }
+
+            if (selected)
+            {
+                DrawRoundBorder(mem, &inner, CAL_ACCENT, 0);
+            }
 
             if (today.wYear == g_calYear && today.wMonth == g_calMonth &&
                 today.wDay == day)
@@ -2778,11 +3322,40 @@ static void CalPaint(HWND h)
                 DrawDashedRoundRect(mem, &cell, CAL_TODAY, S(2));
             }
 
+            /* 普通周末日期数字用淡红/淡蓝，选中或有活动时保持其配色 */
+            if (!hasTask && !selected)
+            {
+                if (col == 0) { textColor = CAL_SUN; }
+                else if (col == 6) { textColor = CAL_SAT; }
+            }
+
+            /* 日期数字：有活动时靠上，底部留位画分类圆点 */
             wchar_t num[8];
             StringCchPrintfW(num, 8, L"%d", day);
+            RECT numRect = cell;
+            if (hasTask)
+            {
+                numRect.bottom = cell.bottom - S(15);
+            }
             SelectObject(mem, font);
             SetTextColor(mem, textColor);
-            DrawTextW(mem, num, -1, &cell, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            DrawTextW(mem, num, -1, &numRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+            /* 分类圆点：当天涉及的分类各画一个饱和色圆点（最多 3 个） */
+            if (hasTask)
+            {
+                int dots = ncat > 3 ? 3 : ncat;
+                int dotR = S(3);
+                int gap = S(5);
+                int totalW = dots * dotR * 2 + (dots - 1) * gap;
+                int cx0 = (cell.left + cell.right) / 2 - totalW / 2 + dotR;
+                int cy = cell.bottom - S(8);
+                for (int d = 0; d < dots; d++)
+                {
+                    FillDot(mem, cx0 + d * (dotR * 2 + gap), cy, dotR,
+                        g_catFill[cats[d]]);
+                }
+            }
         }
     }
 
@@ -2862,6 +3435,98 @@ static void CalNotify(HWND h)
     SendMessageW(GetParent(h), WM_APP_CAL_SELECT, 0, 0);
 }
 
+/* 构造某一天的悬停提示文本，并返回当天首个分类色 */
+static COLORREF BuildDayTip(int year, int month, int day, wchar_t* buf, int cch)
+{
+    wchar_t line[160];
+    SYSTEMTIME d;
+    ZeroMemory(&d, sizeof(d));
+    d.wYear = (WORD)year;
+    d.wMonth = (WORD)month;
+    d.wDay = (WORD)day;
+    FILETIME ft;
+    if (!SystemTimeToFileTime(&d, &ft))
+    {
+        return CAL_ACCENT;
+    }
+    FileTimeToSystemTime(&ft, &d);
+
+    int cnt = DayTaskCount(year, month, day);
+    wchar_t date[32];
+    FmtDate(&d, date, 32);
+    StringCchPrintfW(buf, cch, L"%s %s · ",
+        date, g_weekFull[g_lang][d.wDayOfWeek]);
+    int headLen = (int)lstrlenW(buf);
+    FormatStr(buf + headLen, cch - headLen, STR_DAY_EVENT_COUNT, cnt);
+
+    COLORREF accent = CAL_ACCENT;
+    int shown = 0;
+    const int MAX_SHOW = 6;
+    for (int i = 1; i <= g_count && shown < MAX_SHOW; i++)
+    {
+        struct Task* t = &g_tasks[i];
+        if (t->stStart.wYear == year && t->stStart.wMonth == month &&
+            t->stStart.wDay == day)
+        {
+            if (shown == 0)
+            {
+                accent = g_catFill[t->category];
+            }
+            wchar_t tm1[16];
+            FmtTime(&t->stStart, tm1, 16);
+            StringCchCatW(buf, cch, L"\n");
+            StringCchPrintfW(line, 160, L"%s  %s", tm1, t->title);
+            StringCchCatW(buf, cch, line);
+            shown++;
+        }
+    }
+    if (cnt > shown)
+    {
+        StringCchCatW(buf, cch, L"\n");
+        wchar_t more[64];
+        FormatStr(more, 64, STR_TIP_MORE, cnt - shown);
+        StringCchCatW(buf, cch, more);
+    }
+    return accent;
+}
+
+/* 月历悬停：显示/隐藏当天活动气泡 */
+static void CalUpdateHoverTip(HWND h, int day)
+{
+    if (day <= 0)
+    {
+        HideHoverTip();
+        return;
+    }
+    int cnt = DayTaskCount(g_calYear, g_calMonth, day);
+    if (cnt <= 0)
+    {
+        HideHoverTip();
+        return;
+    }
+    struct CalLayout L;
+    CalGetLayout(h, &L);
+    int first = FirstWeekday(g_calYear, g_calMonth);
+    int index = first + day - 1;
+    int col = index % 7;
+    int row = index / 7;
+    RECT cell;
+    SetRect(&cell, L.pad + col * L.cellW, L.gridTop + row * L.cellH,
+        L.pad + (col + 1) * L.cellW, L.gridTop + (row + 1) * L.cellH);
+    POINT tl, br;
+    tl.x = cell.left;
+    tl.y = cell.top;
+    br.x = cell.right;
+    br.y = cell.bottom;
+    ClientToScreen(h, &tl);
+    ClientToScreen(h, &br);
+    SetRect(&cell, tl.x, tl.y, br.x, br.y);
+
+    wchar_t tip[1100];
+    COLORREF accent = BuildDayTip(g_calYear, g_calMonth, day, tip, 1100);
+    ShowHoverTip(tip, &cell, 1, accent);
+}
+
 void CalSetDate(const SYSTEMTIME* st)
 {
     g_calSel = *st;
@@ -2912,6 +3577,14 @@ LRESULT CALLBACK CalWndProc(HWND h, UINT message, WPARAM wParam, LPARAM lParam)
             g_calHoverDay = day;
             InvalidateRect(h, NULL, FALSE);
         }
+        if (nav == 0)
+        {
+            CalUpdateHoverTip(h, day);
+        }
+        else
+        {
+            HideHoverTip();
+        }
         if (!g_calTracking)
         {
             TRACKMOUSEEVENT tme;
@@ -2929,6 +3602,7 @@ LRESULT CALLBACK CalWndProc(HWND h, UINT message, WPARAM wParam, LPARAM lParam)
         g_calTracking = 0;
         g_calHoverDay = 0;
         g_calHoverNav = 0;
+        HideHoverTip();
         InvalidateRect(h, NULL, FALSE);
         return 0;
 
@@ -3025,6 +3699,1023 @@ LRESULT CALLBACK CalWndProc(HWND h, UINT message, WPARAM wParam, LPARAM lParam)
     return DefWindowProcW(h, message, wParam, lParam);
 }
 
+/*============================= 悬停提示气泡 =============================*/
+
+#define TIP_MAX_LINES  9
+#define TIP_MAX_CHARS  2048
+#define TIP_WIDTH      S(280)
+#define TIP_PAD        S(11)
+#define TIP_LINE_H     S(20)
+#define TIP_BAR_W      S(5)
+
+static wchar_t g_tipText[TIP_MAX_CHARS];
+static wchar_t* g_tipLines[TIP_MAX_LINES];
+static int g_tipLineCount = 0;
+static int g_tipFirstBold = 1;
+static COLORREF g_tipAccent = RGB(0, 120, 212);
+
+/* 计算气泡所需高度（像素） */
+static int TipCalcHeight(HDC hdc)
+{
+    int y = TIP_PAD * 2;
+    HDC useDc = (hdc != NULL) ? hdc : GetDC(NULL);
+    for (int i = 0; i < g_tipLineCount; i++)
+    {
+        HGDIOBJ old = SelectObject(useDc,
+            (i == 0 && g_tipFirstBold) ? g_fontTipTitle : g_fontTipBody);
+        RECT r;
+        SetRect(&r, 0, 0, TIP_WIDTH - TIP_PAD * 2 - TIP_BAR_W - S(6), 0);
+        DrawTextW(useDc, g_tipLines[i], -1, &r,
+            DT_CALCRECT | DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+        int h = r.bottom - r.top;
+        if (h < TIP_LINE_H) { h = TIP_LINE_H; }
+        y += h + (i == 0 ? S(4) : S(1));
+        SelectObject(useDc, old);
+    }
+    if (hdc == NULL)
+    {
+        ReleaseDC(NULL, useDc);
+    }
+    return y + S(4);
+}
+
+static void TipPaint(HWND h)
+{
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(h, &ps);
+    RECT rc;
+    GetClientRect(h, &rc);
+
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+
+    HBRUSH bg = CreateSolidBrush(g_theme->tipBg);
+    FillRect(mem, &rc, bg);
+    DeleteObject(bg);
+
+    /* 左侧分类色条 */
+    HBRUSH bar = CreateSolidBrush(g_tipAccent);
+    RECT barRc;
+    SetRect(&barRc, 0, 0, TIP_BAR_W, rc.bottom);
+    FillRect(mem, &barRc, bar);
+    DeleteObject(bar);
+
+    SetBkMode(mem, TRANSPARENT);
+    int y = TIP_PAD;
+    int textLeft = TIP_PAD + TIP_BAR_W + S(6);
+    for (int i = 0; i < g_tipLineCount; i++)
+    {
+        int bold = (i == 0 && g_tipFirstBold);
+        HGDIOBJ old = SelectObject(mem, bold ? g_fontTipTitle : g_fontTipBody);
+        SetTextColor(mem, bold ? g_theme->tipText : g_theme->tipMuted);
+        RECT r;
+        SetRect(&r, textLeft, y, rc.right - TIP_PAD, 0);
+        RECT r2 = r;
+        DrawTextW(mem, g_tipLines[i], -1, &r2,
+            DT_CALCRECT | DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+        int h = r2.bottom - r2.top;
+        if (h < TIP_LINE_H) { h = TIP_LINE_H; }
+        r.bottom = y + h;
+        DrawTextW(mem, g_tipLines[i], -1, &r,
+            DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+        y += h + (i == 0 ? S(4) : S(1));
+        SelectObject(mem, old);
+    }
+
+    BitBlt(hdc, 0, 0, rc.right, rc.bottom, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    EndPaint(h, &ps);
+}
+
+LRESULT CALLBACK TipWndProc(HWND h, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_PAINT:
+        TipPaint(h);
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PRINTCLIENT:
+    {
+        RECT rc;
+        GetClientRect(h, &rc);
+        HBRUSH bg = CreateSolidBrush(g_theme->tipBg);
+        FillRect((HDC)wParam, &rc, bg);
+        DeleteObject(bg);
+        return 0;
+    }
+    }
+    return DefWindowProcW(h, message, wParam, lParam);
+}
+
+/* 显示气泡：text 用 L"\n" 分行；avoid 为屏幕坐标，气泡尽量避开该区域。
+   firstBold 表示第一行是否用标题粗体。 */
+void ShowHoverTip(const wchar_t* text, const RECT* avoid, int firstBold, COLORREF accent)
+{
+    if (text == NULL || text[0] == 0)
+    {
+        HideHoverTip();
+        return;
+    }
+
+    StringCchCopyW(g_tipText, TIP_MAX_CHARS, text);
+    g_tipFirstBold = firstBold;
+    g_tipAccent = accent;
+
+    /* 按 \n 拆行 */
+    g_tipLineCount = 0;
+    g_tipLines[0] = g_tipText;
+    g_tipLineCount = 1;
+    for (wchar_t* p = g_tipText; *p != 0; p++)
+    {
+        if (*p == L'\n')
+        {
+            *p = 0;
+            if (g_tipLineCount < TIP_MAX_LINES)
+            {
+                g_tipLines[g_tipLineCount] = p + 1;
+                g_tipLineCount++;
+            }
+        }
+    }
+
+    if (g_hTip2 == NULL)
+    {
+        g_hTip2 = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            L"TimeManagerTip", L"", WS_POPUP,
+            0, 0, TIP_WIDTH, S(10),
+            g_hMain, NULL, g_hInst, NULL);
+        if (g_hTip2 == NULL)
+        {
+            return;
+        }
+    }
+
+    HDC hdc = GetDC(g_hTip2);
+    int tipH = TipCalcHeight(hdc);
+    int tipW = TIP_WIDTH;
+    ReleaseDC(g_hTip2, hdc);
+
+    HRGN rgn = CreateRoundRectRgn(0, 0, tipW + 1, tipH + 1, S(12), S(12));
+    SetWindowRgn(g_hTip2, rgn, FALSE);
+
+    RECT wa;
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+
+    int x = (avoid->left + avoid->right) / 2 - tipW / 2;
+    int y = avoid->bottom + S(8);
+    if (y + tipH > wa.bottom - S(4))
+    {
+        y = avoid->top - tipH - S(8);     /* 下方放不下，移到上方 */
+    }
+    if (y < wa.top + S(4))
+    {
+        y = wa.top + S(4);
+        x = avoid->right + S(10);        /* 仍放不下，放右侧 */
+    }
+    if (x + tipW > wa.right - S(4))
+    {
+        x = wa.right - tipW - S(4);
+    }
+    if (x < wa.left + S(4))
+    {
+        x = wa.left + S(4);
+    }
+
+    SetWindowPos(g_hTip2, HWND_TOPMOST, x, y, tipW, tipH,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    InvalidateRect(g_hTip2, NULL, TRUE);
+}
+
+void HideHoverTip(void)
+{
+    if (g_hTip2 != NULL)
+    {
+        ShowWindow(g_hTip2, SW_HIDE);
+    }
+    g_weekHoverTask = 0;
+}
+
+/*============================= 周视图（时间网格） =============================*/
+
+struct WeekBlock
+{
+    int taskIndex;     /* g_tasks 下标 */
+    int col;           /* 0=周一 … 6=周日 */
+    int lane;
+    int lanes;
+    int cat;
+    int startMin;
+    int endMin;
+    RECT rc;
+};
+
+#define WEEK_COLOR_HEAD   (g_theme->card)
+#define WEEK_COLOR_LINE   (g_theme->line)
+#define WEEK_COLOR_TODAY  (g_theme->todayBg)
+#define WEEK_COLOR_AXIS   (g_theme->muted)
+#define WEEK_COLOR_NOW    (g_theme->now)
+
+static struct WeekBlock g_wb[MAX_TASKS + 1];
+static int g_wbCount = 0;
+
+static void WeekGetMonday(SYSTEMTIME* mon)
+{
+    MondayOfDate(&g_weekAnchor, mon);
+}
+
+static int WeekScrollRange(int gridH)
+{
+    /* 底部多留 S(26)，使滚到底时 24:00 标签完整可见 */
+    int contentH = WEEK_HOURS * WEEK_ROW_H + S(26);
+    int r = contentH - gridH;
+    return r > 0 ? r : 0;
+}
+
+static void WeekClampScroll(HWND h)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    int max = WeekScrollRange(rc.bottom - WEEK_HEADER_H);
+    if (g_weekScroll > max) { g_weekScroll = max; }
+    if (g_weekScroll < 0) { g_weekScroll = 0; }
+}
+
+/* 仅比较年月日：a 早于 b 返回 -1，相等 0，晚于 1 */
+static int CmpDate(const SYSTEMTIME* a, const SYSTEMTIME* b)
+{
+    if (a->wYear != b->wYear) { return a->wYear < b->wYear ? -1 : 1; }
+    if (a->wMonth != b->wMonth) { return a->wMonth < b->wMonth ? -1 : 1; }
+    if (a->wDay != b->wDay) { return a->wDay < b->wDay ? -1 : 1; }
+    return 0;
+}
+
+/* 任务在某列（当天）的起止分钟：跨天部分按 0:00 / 24:00 裁剪 */
+static void WeekDaySpan(const struct Task* t, const SYSTEMTIME* d, int* pS, int* pE)
+{
+    int sMin, eMin;
+    if (CmpDate(d, &t->stStart) == 0)
+    {
+        sMin = t->stStart.wHour * 60 + t->stStart.wMinute;
+    }
+    else
+    {
+        sMin = 0;
+    }
+    if (CmpDate(d, &t->stEnd) == 0)
+    {
+        eMin = t->stEnd.wHour * 60 + t->stEnd.wMinute;
+    }
+    else
+    {
+        eMin = 24 * 60;
+    }
+    if (eMin <= sMin) { eMin = sMin + 30; }
+    *pS = sMin;
+    *pE = eMin;
+}
+
+/* 生成一周所有任务方块（含分栏与几何），结果写 g_wb / g_wbCount */
+static void WeekBuildBlocks(HWND h)
+{
+    g_wbCount = 0;
+    RECT rc;
+    GetClientRect(h, &rc);
+    int W = rc.right;
+    int H = rc.bottom;
+    int gridTop = WEEK_HEADER_H;
+    int colW = (W - WEEK_AXIS_W) / 7;
+    if (colW < 8) { colW = 8; }
+    WeekClampScroll(h);
+
+    SYSTEMTIME mon;
+    WeekGetMonday(&mon);
+    int dayStart = WEEK_START_HOUR * 60;
+    int dayEnd = WEEK_END_HOUR * 60;
+
+    /* 每列收集任务（任务下标），g_tasks 已按开始时间排序，按列分组保持有序 */
+    int colItems[7][MAX_TASKS + 1];
+    int colCnt[7];
+    int colLane[7][MAX_TASKS + 1];
+    int laneEnd[7][WEEK_MAX_LANES + 1];
+    int colLanes[7];
+    for (int c = 0; c < 7; c++)
+    {
+        colCnt[c] = 0;
+        colLanes[c] = 1;
+        for (int k = 0; k <= WEEK_MAX_LANES; k++)
+        {
+            laneEnd[c][k] = -1;
+        }
+    }
+
+    /* 收集每列任务：跨天任务在它覆盖的每一天都出现（含次日凌晨） */
+    for (int i = 1; i <= g_count; i++)
+    {
+        struct Task* t = &g_tasks[i];
+        SYSTEMTIME lastDay = t->stEnd;
+        /* 结束恰在某天 00:00，则最后覆盖日是前一天 */
+        if (t->stEnd.wHour == 0 && t->stEnd.wMinute == 0 &&
+            CmpDate(&t->stEnd, &t->stStart) > 0)
+        {
+            AddDays(&lastDay, -1);
+        }
+        for (int c = 0; c < 7; c++)
+        {
+            SYSTEMTIME d = mon;
+            AddDays(&d, c);
+            if (CmpDate(&d, &t->stStart) >= 0 && CmpDate(&d, &lastDay) <= 0)
+            {
+                if (colCnt[c] < MAX_TASKS)
+                {
+                    colCnt[c]++;
+                    colItems[c][colCnt[c]] = i;
+                }
+            }
+        }
+    }
+
+    /* 每列按当天开始时间排序（跨天延续任务 sMin=0 应排最前） */
+    for (int c = 0; c < 7; c++)
+    {
+        for (int a = 1; a <= colCnt[c]; a++)
+        {
+            for (int b = a + 1; b <= colCnt[c]; b++)
+            {
+                struct Task* ta = &g_tasks[colItems[c][a]];
+                struct Task* tb = &g_tasks[colItems[c][b]];
+                SYSTEMTIME da = mon;
+                AddDays(&da, c);
+                int sa, sb, ea2, eb2;
+                WeekDaySpan(ta, &da, &sa, &ea2);
+                WeekDaySpan(tb, &da, &sb, &eb2);
+                if (sb < sa)
+                {
+                    int tmp = colItems[c][a];
+                    colItems[c][a] = colItems[c][b];
+                    colItems[c][b] = tmp;
+                }
+            }
+        }
+    }
+
+    /* 每列做 lane 分配（区间图贪心着色，处理时间重叠） */
+    for (int c = 0; c < 7; c++)
+    {
+        SYSTEMTIME d0 = mon;
+        AddDays(&d0, c);
+        for (int q = 1; q <= colCnt[c]; q++)
+        {
+            int idx = colItems[c][q];
+            struct Task* t = &g_tasks[idx];
+            int sMin, eMin;
+            WeekDaySpan(t, &d0, &sMin, &eMin);
+
+            int lane = 0;
+            for (int k = 1; k <= colLanes[c]; k++)
+            {
+                if (laneEnd[c][k] <= sMin)
+                {
+                    lane = k;
+                    break;
+                }
+            }
+            if (lane == 0)
+            {
+                if (colLanes[c] < WEEK_MAX_LANES)
+                {
+                    colLanes[c]++;
+                    lane = colLanes[c];
+                }
+                else
+                {
+                    lane = 1;       /* 超过最大分栏则共用第一栏 */
+                }
+            }
+            laneEnd[c][lane] = eMin;
+            colLane[c][q] = lane;
+        }
+    }
+
+    /* 生成方块几何 */
+    for (int c = 0; c < 7; c++)
+    {
+        int lanes = colLanes[c];
+        if (colCnt[c] == 0)
+        {
+            lanes = 1;
+        }
+        int laneW = colW / lanes;
+        for (int q = 1; q <= colCnt[c]; q++)
+        {
+            int idx = colItems[c][q];
+            struct Task* t = &g_tasks[idx];
+            SYSTEMTIME d0 = mon;
+            AddDays(&d0, c);
+            int sMin, eMin;
+            WeekDaySpan(t, &d0, &sMin, &eMin);
+
+            /* 裁剪到显示时间窗 */
+            int drawS = sMin < dayStart ? dayStart : sMin;
+            int drawE = eMin > dayEnd ? dayEnd : eMin;
+            if (drawS >= dayEnd || drawE <= dayStart)
+            {
+                continue;
+            }
+
+            int lane = colLane[c][q];
+            int top = gridTop + (drawS - dayStart) * WEEK_ROW_H / 60 - g_weekScroll;
+            int bottom = gridTop + (drawE - dayStart) * WEEK_ROW_H / 60 - g_weekScroll;
+            if (bottom - top < S(22))
+            {
+                bottom = top + S(22);
+            }
+            int left = WEEK_AXIS_W + c * colW + (lane - 1) * laneW;
+            int right = WEEK_AXIS_W + c * colW + lane * laneW;
+            RECT r;
+            SetRect(&r, left + S(2), top + S(2), right - S(2), bottom - S(2));
+
+            g_wbCount++;
+            struct WeekBlock* b = &g_wb[g_wbCount];
+            b->taskIndex = idx;
+            b->col = c;
+            b->lane = lane;
+            b->lanes = lanes;
+            b->cat = (t->category >= 1 && t->category <= CAT_COUNT) ? t->category : CAT_OTHER;
+            b->startMin = sMin;
+            b->endMin = eMin;
+            b->rc = r;
+        }
+    }
+}
+
+/* 取今天对应列（周一=0…周日=6），不在本周返回 -1 */
+static int WeekTodayColumn(void)
+{
+    SYSTEMTIME mon, now;
+    WeekGetMonday(&mon);
+    GetLocalTime(&now);
+    for (int c = 0; c < 7; c++)
+    {
+        SYSTEMTIME d = mon;
+        AddDays(&d, c);
+        if (d.wYear == now.wYear && d.wMonth == now.wMonth && d.wDay == now.wDay)
+        {
+            return c;
+        }
+    }
+    return -1;
+}
+
+static void WeekPaint(HWND h)
+{
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(h, &ps);
+    RECT rc;
+    GetClientRect(h, &rc);
+    int W = rc.right;
+    int H = rc.bottom;
+    if (W <= 0 || H <= 0)
+    {
+        EndPaint(h, &ps);
+        return;
+    }
+
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, W, H);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+
+    HBRUSH white = CreateSolidBrush(g_theme->card);
+    FillRect(mem, &rc, white);
+    DeleteObject(white);
+
+    int gridTop = WEEK_HEADER_H;
+    int colW = (W - WEEK_AXIS_W) / 7;
+    if (colW < 8) { colW = 8; }
+    WeekClampScroll(h);
+
+    SYSTEMTIME mon;
+    WeekGetMonday(&mon);
+    int todayCol = WeekTodayColumn();
+
+    /* 左侧时间轴区底色 */
+    {
+        HBRUSH ab = CreateSolidBrush(WEEK_BG_AXIS);
+        RECT ar;
+        SetRect(&ar, 0, gridTop, WEEK_AXIS_W, H);
+        FillRect(mem, &ar, ab);
+        DeleteObject(ab);
+    }
+
+    /* 夜间时段横带（0:00-7:00、22:00-24:00），区分休息时段 */
+    {
+        HBRUSH nb = CreateSolidBrush(WEEK_BG_NIGHT);
+        for (int hh = 0; hh < WEEK_HOURS; hh++)
+        {
+            if (hh < 7 || hh >= 22)
+            {
+                int y0 = gridTop + (hh - WEEK_START_HOUR) * WEEK_ROW_H - g_weekScroll;
+                int y1 = gridTop + (hh + 1 - WEEK_START_HOUR) * WEEK_ROW_H - g_weekScroll;
+                if (y1 > gridTop && y0 < H)
+                {
+                    if (y0 < gridTop) { y0 = gridTop; }
+                    if (y1 > H) { y1 = H; }
+                    RECT nr;
+                    SetRect(&nr, WEEK_AXIS_W, y0, W, y1);
+                    FillRect(mem, &nr, nb);
+                }
+            }
+        }
+        DeleteObject(nb);
+    }
+
+    /* 周末列（周六、周日）淡色底 */
+    {
+        HBRUSH wb = CreateSolidBrush(WEEK_BG_WEEKEND);
+        for (int c = 5; c <= 6; c++)
+        {
+            RECT wr;
+            SetRect(&wr, WEEK_AXIS_W + c * colW, gridTop,
+                WEEK_AXIS_W + (c + 1) * colW, H);
+            FillRect(mem, &wr, wb);
+        }
+        DeleteObject(wb);
+    }
+
+    /* 今天列整列浅底 */
+    if (todayCol >= 0)
+    {
+        RECT tr;
+        SetRect(&tr, WEEK_AXIS_W + todayCol * colW, gridTop,
+            WEEK_AXIS_W + (todayCol + 1) * colW, H);
+        HBRUSH tb = CreateSolidBrush(WEEK_COLOR_TODAY);
+        FillRect(mem, &tr, tb);
+        DeleteObject(tb);
+    }
+
+    /* 网格横线与时间轴标签 */
+    SetBkMode(mem, TRANSPARENT);
+    SelectObject(mem, g_fontWeekAxis);
+    SetTextColor(mem, WEEK_COLOR_AXIS);
+    for (int hour = WEEK_START_HOUR; hour <= WEEK_END_HOUR; hour++)
+    {
+        int y = gridTop + (hour - WEEK_START_HOUR) * WEEK_ROW_H - g_weekScroll;
+        if (y >= gridTop - S(1) && y <= H)
+        {
+            HPEN pen = CreatePen(PS_SOLID, 1, WEEK_COLOR_LINE);
+            HGDIOBJ oldPen = SelectObject(mem, pen);
+            MoveToEx(mem, WEEK_AXIS_W, y, NULL);
+            LineTo(mem, W, y);
+            SelectObject(mem, oldPen);
+            DeleteObject(pen);
+        }
+        if (hour <= WEEK_END_HOUR && y >= gridTop - S(1) && y <= H)
+        {
+            wchar_t lab[8];
+            StringCchPrintfW(lab, 8, L"%02d:00", hour);
+            int arTop = y - S(11);
+            int arBot = y + S(12);
+            if (arTop < gridTop) { arTop = gridTop; }
+            if (arBot > H) { arBot = H; }
+            RECT ar;
+            SetRect(&ar, 0, arTop, WEEK_AXIS_W - S(4), arBot);
+            DrawTextW(mem, lab, -1, &ar, DT_RIGHT | DT_SINGLELINE | DT_VCENTER);
+        }
+    }
+
+    /* 竖列分隔线 */
+    HPEN vpen = CreatePen(PS_SOLID, 1, WEEK_COLOR_LINE);
+    HGDIOBJ oldvpen = SelectObject(mem, vpen);
+    for (int c = 0; c <= 7; c++)
+    {
+        int x = WEEK_AXIS_W + c * colW;
+        MoveToEx(mem, x, gridTop, NULL);
+        LineTo(mem, x, H);
+    }
+    MoveToEx(mem, 0, gridTop, NULL);
+    LineTo(mem, W, gridTop);
+    SelectObject(mem, oldvpen);
+    DeleteObject(vpen);
+
+    /* 列头区淡色底 */
+    {
+        HBRUSH hb = CreateSolidBrush(WEEK_BG_AXIS);
+        RECT hh;
+        SetRect(&hh, 0, 0, W, gridTop);
+        FillRect(mem, &hh, hb);
+        DeleteObject(hb);
+    }
+
+    /* 列头：星期 + 日期，今天列蓝色块高亮 */
+    for (int c = 0; c < 7; c++)
+    {
+        SYSTEMTIME d = mon;
+        AddDays(&d, c);
+        int isToday = (todayCol == c);
+        RECT hc;
+        SetRect(&hc, WEEK_AXIS_W + c * colW, 0,
+            WEEK_AXIS_W + (c + 1) * colW, gridTop);
+
+        if (isToday)
+        {
+            RECT chip = hc;
+            InflateRect(&chip, -S(6), -S(5));
+            FillRoundedRect(mem, &chip, CAL_ACCENT);
+        }
+
+        wchar_t head[40];
+        StringCchPrintfW(head, 40, L"%s  %d/%d",
+            g_weekShort[g_lang][d.wDayOfWeek], d.wMonth, d.wDay);
+        SelectObject(mem, g_fontWeekHead);
+        SetTextColor(mem, isToday ? RGB(255, 255, 255) :
+            (d.wDayOfWeek == 0 ? CAL_SUN : (d.wDayOfWeek == 6 ? CAL_SAT : CAL_TEXT)));
+        DrawTextW(mem, head, -1, &hc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    /* 任务方块：裁剪到表头下方，防止垂直滚动时方块上移遮挡日期列头 */
+    int nSavedDc = SaveDC(mem);
+    IntersectClipRect(mem, 0, gridTop, W, H);
+    WeekBuildBlocks(h);
+    for (int i = 1; i <= g_wbCount; i++)
+    {
+        struct WeekBlock* b = &g_wb[i];
+        if (b->rc.bottom < gridTop || b->rc.top > H)
+        {
+            continue;
+        }
+        struct Task* t = &g_tasks[b->taskIndex];
+        FillRoundedRect(mem, &b->rc, g_catFill[b->cat]);
+
+        RECT tr = b->rc;
+        InflateRect(&tr, -S(5), -S(3));
+        SetBkMode(mem, TRANSPARENT);
+        SelectObject(mem, g_fontWeekBlock);
+        SetTextColor(mem, RGB(255, 255, 255));
+        DrawTextW(mem, t->title, -1, &tr,
+            DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        if (b->rc.bottom - b->rc.top >= S(44))
+        {
+            wchar_t tm[24];
+            StringCchPrintfW(tm, 24, L"%02d:%02d",
+                t->stStart.wHour, t->stStart.wMinute);
+            RECT tr2 = tr;
+            tr2.top += S(19);
+            SelectObject(mem, g_fontWeekAxis);
+            SetTextColor(mem, RGB(240, 246, 252));
+            DrawTextW(mem, tm, -1, &tr2, DT_LEFT | DT_TOP | DT_SINGLELINE);
+        }
+        if (b->rc.bottom - b->rc.top >= S(66) && t->note[0] != 0)
+        {
+            RECT tr3 = tr;
+            tr3.top += S(35);
+            SelectObject(mem, g_fontWeekAxis);
+            SetTextColor(mem, RGB(240, 246, 252));
+            DrawTextW(mem, t->note, -1, &tr3,
+                DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+
+        /* 选中高亮：蓝色外框 + 白色内框（跨天任务的两段都高亮） */
+        if (t->id == g_weekSelId)
+        {
+            DrawRoundBorder(mem, &b->rc, CAL_ACCENT, -S(1));
+            DrawRoundBorder(mem, &b->rc, RGB(255, 255, 255), S(2));
+        }
+    }
+    RestoreDC(mem, nSavedDc);
+
+    /* 当前时间线（仅今天列、且在显示时间窗内） */
+    if (todayCol >= 0)
+    {
+        SYSTEMTIME now2;
+        GetLocalTime(&now2);
+        int nowMin = now2.wHour * 60 + now2.wMinute;
+        if (nowMin >= WEEK_START_HOUR * 60 && nowMin <= WEEK_END_HOUR * 60)
+        {
+            int y = gridTop + (nowMin - WEEK_START_HOUR * 60) * WEEK_ROW_H / 60
+                - g_weekScroll;
+            if (y >= gridTop && y <= H)
+            {
+                HPEN npen = CreatePen(PS_SOLID, S(2), WEEK_COLOR_NOW);
+                HGDIOBJ oldPen = SelectObject(mem, npen);
+                int x0 = WEEK_AXIS_W + todayCol * colW;
+                int x1 = WEEK_AXIS_W + (todayCol + 1) * colW;
+                MoveToEx(mem, x0, y, NULL);
+                LineTo(mem, x1, y);
+                SelectObject(mem, oldPen);
+                DeleteObject(npen);
+                HBRUSH nb = CreateSolidBrush(WEEK_COLOR_NOW);
+                HGDIOBJ oldb = SelectObject(mem, nb);
+                HGDIOBJ oldp = SelectObject(mem, GetStockObject(NULL_PEN));
+                Ellipse(mem, x0 - S(3), y - S(3), x0 + S(3), y + S(3));
+                SelectObject(mem, oldp);
+                SelectObject(mem, oldb);
+                DeleteObject(nb);
+            }
+        }
+    }
+
+    /* 空周提示 */
+    if (g_wbCount == 0)
+    {
+        SelectObject(mem, g_fontWeekHead);
+        SetTextColor(mem, g_theme->empty);
+        SetBkMode(mem, TRANSPARENT);
+        RECT er;
+        SetRect(&er, WEEK_AXIS_W, gridTop, W, H);
+        DrawTextW(mem, Str(STR_WEEK_NO_EVENT), -1, &er,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    }
+
+    /* 卡片外边框 */
+    {
+        HBRUSH bd = CreateSolidBrush(CARD_BORDER);
+        FrameRect(mem, &rc, bd);
+        DeleteObject(bd);
+    }
+
+    BitBlt(hdc, 0, 0, W, H, mem, 0, 0, SRCCOPY);
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    EndPaint(h, &ps);
+}
+
+/* 命中测试：返回任务下标（1..g_count），并给出方块客户矩形；无命中返回 0 */
+static int WeekHitTest(HWND h, int x, int y, RECT* outRc)
+{
+    if (y < WEEK_HEADER_H)
+    {
+        return 0;       /* 表头区域不响应活动悬停 */
+    }
+    WeekBuildBlocks(h);
+    for (int i = 1; i <= g_wbCount; i++)
+    {
+        POINT pt;
+        pt.x = x;
+        pt.y = y;
+        if (PtInRect(&g_wb[i].rc, pt))
+        {
+            *outRc = g_wb[i].rc;
+            return g_wb[i].taskIndex;
+        }
+    }
+    return 0;
+}
+
+static void WeekUpdateScrollBar(HWND h)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    int gridH = rc.bottom - WEEK_HEADER_H;
+    SCROLLINFO si;
+    ZeroMemory(&si, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin = 0;
+    si.nMax = WEEK_HOURS * WEEK_ROW_H + S(26);
+    si.nPage = (UINT)gridH;
+    si.nPos = g_weekScroll;
+    SetScrollInfo(h, SB_VERT, &si, TRUE);
+}
+
+/* 构造任务方块的悬停提示 */
+static void BuildBlockTip(const struct Task* t, wchar_t* buf, int cch)
+{
+    wchar_t date[32], tm1[16], tm2[16], line[320];
+    FmtDate(&t->stStart, date, 32);
+    FmtTime(&t->stStart, tm1, 16);
+    FmtTime(&t->stEnd, tm2, 16);
+    StringCchPrintfW(buf, cch, L"%s", t->title);
+    StringCchCatW(buf, cch, L"\n");
+    FormatStr(line, 320, STR_TIP_CAT, CatStr(t->category));
+    StringCchCatW(buf, cch, line);
+    StringCchCatW(buf, cch, L"\n");
+    FormatStr(line, 320, STR_TIP_TIME, date, tm1, tm2);
+    StringCchCatW(buf, cch, line);
+    if (t->rcount > 0)
+    {
+        StringCchCatW(buf, cch, L"\n");
+        FormatStr(line, 320, STR_TIP_REMIND, t->rcount);
+        StringCchCatW(buf, cch, line);
+    }
+    if (t->note[0] != 0)
+    {
+        StringCchCatW(buf, cch, L"\n");
+        FormatStr(line, 320, STR_TIP_NOTE, t->note);
+        StringCchCatW(buf, cch, line);
+    }
+}
+
+void RefreshWeek(void)
+{
+    if (g_hWeek != NULL)
+    {
+        WeekClampScroll(g_hWeek);
+        WeekUpdateScrollBar(g_hWeek);
+        InvalidateRect(g_hWeek, NULL, FALSE);
+    }
+    if (g_hWeekTitle != NULL)
+    {
+        SYSTEMTIME mon, sun;
+        WeekGetMonday(&mon);
+        sun = mon;
+        AddDays(&sun, 6);
+        wchar_t title[48];
+        StringCchPrintfW(title, 48, Str(STR_WEEK_RANGE),
+            mon.wMonth, mon.wDay, sun.wMonth, sun.wDay);
+        SetWindowTextW(g_hWeekTitle, title);
+    }
+}
+
+/* 默认滚动位置：本周定位到当前时间稍上方，其它周从早上 7:00 起 */
+static int WeekDefaultScroll(void)
+{
+    if (WeekTodayColumn() >= 0)
+    {
+        SYSTEMTIME now;
+        GetLocalTime(&now);
+        int nowMin = now.wHour * 60 + now.wMinute;
+        int s = (nowMin - WEEK_START_HOUR * 60) * WEEK_ROW_H / 60 - S(140);
+        if (s < 0) { s = 0; }
+        return s;
+    }
+    return (7 - WEEK_START_HOUR) * WEEK_ROW_H;
+}
+
+/* 翻周：delta=-1 上周，+1 下周，0 回到本周 */
+void WeekShift(int delta)
+{
+    g_weekSelId = 0;     /* 翻周时清除方块选中 */
+    if (delta == 0)
+    {
+        GetLocalTime(&g_weekAnchor);
+        g_weekScroll = WeekDefaultScroll();
+    }
+    else
+    {
+        AddDays(&g_weekAnchor, delta * 7);
+        /* 翻周保持当前滚动位置（同一时段对照） */
+    }
+    RefreshWeek();
+}
+
+LRESULT CALLBACK WeekWndProc(HWND h, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_PAINT:
+        WeekPaint(h);
+        return 0;
+
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_SIZE:
+        WeekUpdateScrollBar(h);
+        return 0;
+
+    case WM_MOUSEWHEEL:
+    {
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        int step = WEEK_ROW_H;
+        g_weekScroll -= (delta > 0 ? step : -step);
+        WeekClampScroll(h);
+        WeekUpdateScrollBar(h);
+        InvalidateRect(h, NULL, FALSE);
+        return 0;
+    }
+
+    case WM_VSCROLL:
+    {
+        SCROLLINFO si;
+        ZeroMemory(&si, sizeof(si));
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_ALL;
+        GetScrollInfo(h, SB_VERT, &si);
+        int oldPos = si.nPos;
+        switch (LOWORD(wParam))
+        {
+        case SB_LINEUP:      si.nPos -= S(28); break;
+        case SB_LINEDOWN:    si.nPos += S(28); break;
+        case SB_PAGEUP:      si.nPos -= WEEK_ROW_H * 2; break;
+        case SB_PAGEDOWN:    si.nPos += WEEK_ROW_H * 2; break;
+        case SB_THUMBTRACK:  si.nPos = si.nTrackPos; break;
+        default: break;
+        }
+        si.fMask = SIF_POS;
+        SetScrollInfo(h, SB_VERT, &si, TRUE);
+        GetScrollInfo(h, SB_VERT, &si);
+        if (si.nPos != oldPos)
+        {
+            g_weekScroll = si.nPos;
+            WeekClampScroll(h);
+            InvalidateRect(h, NULL, FALSE);
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE:
+    {
+        POINT pt;
+        pt.x = GET_X_LPARAM(lParam);
+        pt.y = GET_Y_LPARAM(lParam);
+        RECT br;
+        int idx = WeekHitTest(h, pt.x, pt.y, &br);
+        if (idx > 0)
+        {
+            if (g_weekHoverTask != g_tasks[idx].id)
+            {
+                g_weekHoverTask = g_tasks[idx].id;
+                POINT tl, brp;
+                tl.x = br.left;
+                tl.y = br.top;
+                brp.x = br.right;
+                brp.y = br.bottom;
+                ClientToScreen(h, &tl);
+                ClientToScreen(h, &brp);
+                SetRect(&br, tl.x, tl.y, brp.x, brp.y);
+                wchar_t tip[700];
+                BuildBlockTip(&g_tasks[idx], tip, 700);
+                ShowHoverTip(tip, &br, 1, g_catFill[g_tasks[idx].category]);
+            }
+            SetCursor(LoadCursorW(NULL, IDC_HAND));
+        }
+        else
+        {
+            if (g_weekHoverTask != 0)
+            {
+                HideHoverTip();
+            }
+            SetCursor(LoadCursorW(NULL, IDC_ARROW));
+        }
+        if (!g_weekTracking)
+        {
+            TRACKMOUSEEVENT tme;
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = h;
+            TrackMouseEvent(&tme);
+            g_weekTracking = 1;
+        }
+        return 0;
+    }
+
+    case WM_MOUSELEAVE:
+        g_weekTracking = 0;
+        HideHoverTip();
+        return 0;
+
+    case WM_LBUTTONDOWN:
+    {
+        POINT pt;
+        pt.x = GET_X_LPARAM(lParam);
+        pt.y = GET_Y_LPARAM(lParam);
+        RECT br;
+        int idx = WeekHitTest(h, pt.x, pt.y, &br);
+        if (idx > 0)
+        {
+            g_weekSelId = g_tasks[idx].id;
+            HideHoverTip();
+        }
+        else
+        {
+            g_weekSelId = 0;      /* 点空白处取消选中 */
+        }
+        InvalidateRect(h, NULL, FALSE);
+        return 0;
+    }
+
+    case WM_LBUTTONDBLCLK:
+    {
+        POINT pt;
+        pt.x = GET_X_LPARAM(lParam);
+        pt.y = GET_Y_LPARAM(lParam);
+        RECT br;
+        int idx = WeekHitTest(h, pt.x, pt.y, &br);
+        if (idx > 0)
+        {
+            /* 双击方块切到月视图并选中该日 */
+            g_calSel = g_tasks[idx].stStart;
+            g_calYear = g_calSel.wYear;
+            g_calMonth = g_calSel.wMonth;
+            g_filterMode = 1;
+            g_filterDate = g_calSel;
+            SetViewMode(VIEW_MONTH);
+            RefreshList();
+            RefreshCalendar();
+        }
+        return 0;
+    }
+    }
+    return DefWindowProcW(h, message, wParam, lParam);
+}
+
 /*============================= 语言切换 =============================*/
 
 static void SetChildText(HWND parent, int id, int strId)
@@ -3038,15 +4729,15 @@ static void SetChildText(HWND parent, int id, int strId)
 
 static void ApplyListHeaders(void)
 {
-    static const int ids[8] = {
+    static const int ids[9] = {
         STR_LIST_DATE, STR_LIST_DAY, STR_LIST_START, STR_LIST_END,
-        STR_LIST_TITLE, STR_LIST_NOTE, STR_LIST_REMIND, -1
+        STR_LIST_CAT, STR_LIST_TITLE, STR_LIST_NOTE, STR_LIST_REMIND, -1
     };
     if (g_hList == NULL)
     {
         return;
     }
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 9; i++)
     {
         LVCOLUMNW lvc;
         ZeroMemory(&lvc, sizeof(lvc));
@@ -3054,6 +4745,65 @@ static void ApplyListHeaders(void)
         lvc.pszText = (LPWSTR)(ids[i] >= 0 ? Str(ids[i]) : L"");
         ListView_SetColumn(g_hList, i, &lvc);
     }
+}
+
+/* 应用界面风格：只改颜色，不重建字体/控件 */
+void ApplyTheme(void)
+{
+    if (g_set.theme < 0 || g_set.theme >= THEME_COUNT)
+    {
+        g_set.theme = THEME_DEFAULT;
+    }
+    g_theme = &g_themes[g_set.theme];
+
+    HBRUSH oldBg = g_hBgBrush;
+    g_hBgBrush = CreateSolidBrush(g_theme->page);
+    if (g_hMain != NULL)
+    {
+        SetClassLongPtrW(g_hMain, GCLP_HBRBACKGROUND, (LONG_PTR)g_hBgBrush);
+    }
+    if (oldBg != NULL)
+    {
+        DeleteObject(oldBg);
+    }
+
+    HBRUSH oldDlg = g_hDlgBrush;
+    g_hDlgBrush = CreateSolidBrush(g_theme->dialogBg);
+    if (oldDlg != NULL)
+    {
+        DeleteObject(oldDlg);
+    }
+
+    if (g_hMain == NULL)
+    {
+        return;
+    }
+
+    if (g_hList != NULL)
+    {
+        ListView_SetBkColor(g_hList, g_theme->card);
+        ListView_SetTextBkColor(g_hList, g_theme->card);
+        ListView_SetTextColor(g_hList, g_theme->text);
+        InvalidateRect(g_hList, NULL, TRUE);
+    }
+
+    InvalidateRect(g_hMain, NULL, TRUE);
+    if (g_hCal != NULL) { InvalidateRect(g_hCal, NULL, TRUE); }
+    if (g_hWeek != NULL) { InvalidateRect(g_hWeek, NULL, TRUE); }
+    if (g_hStatus != NULL) { InvalidateRect(g_hStatus, NULL, TRUE); }
+    if (g_hTip != NULL) { InvalidateRect(g_hTip, NULL, TRUE); }
+    if (g_hStatToday != NULL) { InvalidateRect(g_hStatToday, NULL, TRUE); }
+    if (g_hChkAuto != NULL) { InvalidateRect(g_hChkAuto, NULL, TRUE); }
+    if (g_hTip2 != NULL) { InvalidateRect(g_hTip2, NULL, TRUE); }
+    for (int i = 1; i <= MAX_TOASTS; i++)
+    {
+        if (g_toasts[i].hwnd != NULL)
+        {
+            InvalidateRect(g_toasts[i].hwnd, NULL, TRUE);
+        }
+    }
+    RedrawWindow(g_hMain, NULL, NULL,
+        RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 
 void ApplyLanguage(void)
@@ -3076,9 +4826,20 @@ void ApplyLanguage(void)
     SetWindowTextW(g_hMain, Str(STR_APP_TITLE));
     SetChildText(g_hMain, IDC_BTN_ADD, STR_BTN_ADD);
     SetChildText(g_hMain, IDC_BTN_DELETE, STR_BTN_DELETE);
-    SetChildText(g_hMain, IDC_BTN_TODAY, STR_BTN_TODAY);
-    SetChildText(g_hMain, IDC_BTN_ALL, STR_BTN_ALL);
     SetChildText(g_hMain, IDC_BTN_SET, STR_BTN_SET);
+    SetChildText(g_hMain, IDC_VIEW_MONTH, STR_VIEW_MONTH);
+    SetChildText(g_hMain, IDC_VIEW_WEEK, STR_VIEW_WEEK);
+    SetChildText(g_hMain, IDC_WEEK_PREV, STR_WEEK_PREV);
+    SetChildText(g_hMain, IDC_WEEK_NEXT, STR_WEEK_NEXT);
+    SetChildText(g_hMain, IDC_WEEK_TODAY, STR_WEEK_TODAY);
+    if (g_hBtnViewMonth != NULL)
+    {
+        InvalidateRect(g_hBtnViewMonth, NULL, TRUE);
+    }
+    if (g_hBtnViewWeek != NULL)
+    {
+        InvalidateRect(g_hBtnViewWeek, NULL, TRUE);
+    }
     if (g_hChkAuto != NULL)
     {
         SetWindowTextW(g_hChkAuto, Str(STR_CHK_AUTOSTART));
@@ -3091,6 +4852,7 @@ void ApplyLanguage(void)
     ApplyListHeaders();
     RefreshList();
     RefreshCalendar();
+    RefreshWeek();
     TrayUpdateTip();
 }
 
@@ -3115,80 +4877,102 @@ static int Main_OnCreate(HWND hWnd)
 {
     CreateAppFonts();
 
-    /* 左侧自绘日历 */
-    g_hCal = CreateWindowExW(0, L"TimeManagerCalendar", L"",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        S(10), S(10), CAL_WIDTH, CAL_HEIGHT,
-        hWnd, (HMENU)(LONG_PTR)IDC_CAL, g_hInst, NULL);
-
     SYSTEMTIME today;
     GetLocalTime(&today);
     g_calSel = today;
     g_calYear = today.wYear;
     g_calMonth = today.wMonth;
+    g_weekAnchor = today;
     g_lastToday = today;
+
+    int tb = S(8);
+    int bh = S(34);
+
+    /* 顶部工具栏：左侧月视图 / 周视图切换（分段按钮） */
+    g_hBtnViewMonth = CreateWindowExW(0, L"BUTTON", Str(STR_VIEW_MONTH),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        S(12), tb, S(92), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_VIEW_MONTH, g_hInst, NULL);
+    g_hBtnViewWeek = CreateWindowExW(0, L"BUTTON", Str(STR_VIEW_WEEK),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        S(106), tb, S(92), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_VIEW_WEEK, g_hInst, NULL);
+
+    /* 周导航（仅周视图可见） */
+    CreateWindowExW(0, L"BUTTON", Str(STR_WEEK_PREV),
+        WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON,
+        S(212), tb, S(38), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_WEEK_PREV, g_hInst, NULL);
+    g_hWeekTitle = CreateWindowExW(0, L"STATIC", L"",
+        WS_CHILD | SS_CENTER | SS_CENTERIMAGE,
+        S(252), tb, S(150), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_WEEK_TITLE, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", Str(STR_WEEK_NEXT),
+        WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON,
+        S(404), tb, S(38), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_WEEK_NEXT, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", Str(STR_WEEK_TODAY),
+        WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON,
+        S(444), tb, S(78), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_WEEK_TODAY, g_hInst, NULL);
+
+    /* 顶部右侧：添加 / 删除 / 设置 */
+    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_SET),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        S(900), tb, S(84), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_BTN_SET, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_DELETE),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        S(790), tb, S(102), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_BTN_DELETE, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_ADD),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+        S(680), tb, S(102), bh,
+        hWnd, (HMENU)(LONG_PTR)IDC_BTN_ADD, g_hInst, NULL);
+
+    /* 左侧自绘日历 */
+    g_hCal = CreateWindowExW(0, L"TimeManagerCalendar", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        S(10), S(54), CAL_WIDTH, CAL_HEIGHT,
+        hWnd, (HMENU)(LONG_PTR)IDC_CAL, g_hInst, NULL);
 
     g_hStatToday = CreateWindowExW(0, L"STATIC", L"",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        S(10), S(10) + CAL_HEIGHT + S(10), S(240), S(24),
+        S(12), S(54) + CAL_HEIGHT + S(10), CAL_WIDTH, S(24),
         hWnd, (HMENU)(LONG_PTR)IDC_STAT_TODAY, g_hInst, NULL);
 
     g_hChkAuto = CreateWindowExW(0, L"BUTTON", Str(STR_CHK_AUTOSTART),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        S(10), S(10) + CAL_HEIGHT + S(44), S(240), S(28),
+        S(12), S(54) + CAL_HEIGHT + S(40), CAL_WIDTH, S(28),
         hWnd, (HMENU)(LONG_PTR)IDC_CHK_AUTO, g_hInst, NULL);
     Button_SetCheck(g_hChkAuto, IsAutoRun() ? BST_CHECKED : BST_UNCHECKED);
 
     /* 左右分隔竖线 */
     CreateWindowExW(0, L"STATIC", L"",
         WS_CHILD | WS_VISIBLE | SS_ETCHEDVERT,
-        S(260), S(8), 1, S(600),
+        S(366), S(54), 1, S(600),
         hWnd, (HMENU)(LONG_PTR)IDC_SEPARATOR, g_hInst, NULL);
 
-    /* 右侧按钮栏 */
-    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_ADD),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(272), S(12), S(100), S(32),
-        hWnd, (HMENU)(LONG_PTR)IDC_BTN_ADD, g_hInst, NULL);
-    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_DELETE),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(380), S(12), S(100), S(32),
-        hWnd, (HMENU)(LONG_PTR)IDC_BTN_DELETE, g_hInst, NULL);
-    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_TODAY),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(488), S(12), S(76), S(32),
-        hWnd, (HMENU)(LONG_PTR)IDC_BTN_TODAY, g_hInst, NULL);
-    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_ALL),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(572), S(12), S(76), S(32),
-        hWnd, (HMENU)(LONG_PTR)IDC_BTN_ALL, g_hInst, NULL);
-    CreateWindowExW(0, L"BUTTON", Str(STR_BTN_SET),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(656), S(12), S(84), S(32),
-        hWnd, (HMENU)(LONG_PTR)IDC_BTN_SET, g_hInst, NULL);
-
-    g_hTip = CreateWindowExW(0, L"STATIC", Str(STR_TIP),
-        WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
-        S(750), S(14), S(200), S(28),
-        hWnd, (HMENU)(LONG_PTR)IDC_TIP, g_hInst, NULL);
-
-    /* 日程列表 */
+    /* 右侧：月视图日程列表 */
     g_hList = CreateWindowExW(0, WC_LISTVIEWW, L"",
         WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL |
         LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
-        S(272), S(56), S(600), S(400),
+        S(374), S(54), S(600), S(400),
         hWnd, (HMENU)(LONG_PTR)IDC_LIST, g_hInst, NULL);
     ListView_SetExtendedListViewStyle(g_hList,
         LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+    ListView_SetBkColor(g_hList, g_theme->card);
+    ListView_SetTextBkColor(g_hList, g_theme->card);
+    ListView_SetTextColor(g_hList, g_theme->text);
 
-    static const int headerIds[8] = {
+    static const int headerIds[9] = {
         STR_LIST_DATE, STR_LIST_DAY, STR_LIST_START, STR_LIST_END,
-        STR_LIST_TITLE, STR_LIST_NOTE, STR_LIST_REMIND, -1
+        STR_LIST_CAT, STR_LIST_TITLE, STR_LIST_NOTE, STR_LIST_REMIND, -1
     };
-    int widths[8] = {
-        S(110), S(80), S(66), S(66), S(190), S(200), S(88), 0
+    int widths[9] = {
+        S(96), S(60), S(50), S(50), S(72), S(146), S(120), S(60), 0
     };
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 9; i++)
     {
         LVCOLUMNW lvc;
         ZeroMemory(&lvc, sizeof(lvc));
@@ -3200,18 +4984,87 @@ static int Main_OnCreate(HWND hWnd)
         ListView_InsertColumn(g_hList, i, &lvc);
     }
 
+    /* 右侧：周视图时间网格（初始隐藏） */
+    g_hWeek = CreateWindowExW(0, L"TimeManagerWeek", L"",
+        WS_CHILD | WS_VSCROLL | WS_CLIPSIBLINGS,
+        S(374), S(54), S(600), S(400),
+        hWnd, (HMENU)(LONG_PTR)IDC_WEEK, g_hInst, NULL);
+
+    /* 底部状态栏 */
     g_hStatus = CreateWindowExW(WS_EX_STATICEDGE, L"STATIC", L"",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        S(8), S(560), S(900), S(30),
+        S(8), S(720), S(900), S(28),
         hWnd, (HMENU)(LONG_PTR)IDC_STATUS, g_hInst, NULL);
+
     EnumChildWindows(hWnd, SetFontToChild, 0);
 
     LoadTasks();
     RefreshList();
     RefreshCalendar();
+    RefreshWeek();
+    SetViewMode(VIEW_MONTH);
 
     SetTimer(hWnd, TIMER_CHECK, 1000, NULL);
     return 0;
+}
+
+/* 切换月视图 / 周视图 */
+void SetViewMode(int mode)
+{
+    g_viewMode = mode;
+    g_weekSelId = 0;     /* 切换视图时清除周视图选中 */
+    if (g_hBtnViewMonth != NULL)
+    {
+        InvalidateRect(g_hBtnViewMonth, NULL, TRUE);
+    }
+    if (g_hBtnViewWeek != NULL)
+    {
+        InvalidateRect(g_hBtnViewWeek, NULL, TRUE);
+    }
+
+    int nav = (mode == VIEW_WEEK) ? SW_SHOW : SW_HIDE;
+    HWND navs[4];
+    navs[0] = GetDlgItem(g_hMain, IDC_WEEK_PREV);
+    navs[1] = GetDlgItem(g_hMain, IDC_WEEK_NEXT);
+    navs[2] = GetDlgItem(g_hMain, IDC_WEEK_TODAY);
+    navs[3] = g_hWeekTitle;
+    for (int i = 0; i < 4; i++)
+    {
+        if (navs[i] != NULL)
+        {
+            ShowWindow(navs[i], nav);
+        }
+    }
+
+    if (g_hWeek != NULL)
+    {
+        ShowWindow(g_hWeek, mode == VIEW_WEEK ? SW_SHOW : SW_HIDE);
+    }
+    if (g_hList != NULL)
+    {
+        ShowWindow(g_hList, mode == VIEW_MONTH ? SW_SHOW : SW_HIDE);
+    }
+
+    if (g_hMain != NULL)
+    {
+        RECT rc;
+        GetClientRect(g_hMain, &rc);
+        Main_OnSize(g_hMain, rc.right, rc.bottom);
+    }
+
+    if (mode == VIEW_WEEK)
+    {
+        if (g_hWeek != NULL)
+        {
+            g_weekScroll = WeekDefaultScroll();
+            WeekClampScroll(g_hWeek);
+        }
+        RefreshWeek();
+    }
+    else
+    {
+        RefreshList();
+    }
 }
 
 static void Main_OnSize(HWND hWnd, int W, int H)
@@ -3220,21 +5073,125 @@ static void Main_OnSize(HWND hWnd, int W, int H)
     {
         return;
     }
-    MoveWindow(g_hTip, S(750), S(14), W - S(750) - S(12), S(28), TRUE);
+
+    int top = S(50);
+    int bottom = H - S(30);
+    int leftW = CAL_WIDTH + S(2);
+    int sepX = leftW + S(8);
+    int rightX = sepX + S(8);
+    int rightW = W - rightX - S(10);
+
+    /* 顶部右侧按钮组：设置 / 删除 / 添加，右对齐 */
+    int bh = S(34);
+    int tb = S(8);
+    int x = W - S(12);
+    HWND bSet = GetDlgItem(hWnd, IDC_BTN_SET);
+    HWND bDel = GetDlgItem(hWnd, IDC_BTN_DELETE);
+    HWND bAdd = GetDlgItem(hWnd, IDC_BTN_ADD);
+    x -= S(84); MoveWindow(bSet, x, tb, S(84), bh, TRUE);
+    x -= S(102) + S(8); MoveWindow(bDel, x, tb, S(102), bh, TRUE);
+    x -= S(102) + S(8); MoveWindow(bAdd, x, tb, S(102), bh, TRUE);
+
+    /* 左栏 */
+    MoveWindow(g_hCal, S(10), top, leftW, CAL_HEIGHT, TRUE);
+    MoveWindow(g_hStatToday, S(12), top + CAL_HEIGHT + S(10), leftW, S(24), TRUE);
+    MoveWindow(g_hChkAuto, S(12), top + CAL_HEIGHT + S(40), leftW, S(28), TRUE);
 
     HWND sep = GetDlgItem(hWnd, IDC_SEPARATOR);
-    MoveWindow(sep, S(260), S(8), 1, H - S(40), TRUE);
+    MoveWindow(sep, sepX, top, 1, bottom - top, TRUE);
 
-    MoveWindow(g_hList, S(272), S(56), W - S(272) - S(12), H - S(56) - S(40), TRUE);
-    MoveWindow(g_hStatus, S(8), H - S(30), W - S(8), S(30), TRUE);
-    SetColumnsWidth(W - S(272) - S(12));
+    /* 右栏：列表与周视图同位置切换 */
+    int rTop = top;
+    int rH = bottom - rTop;
+    MoveWindow(g_hList, rightX, rTop, rightW, rH, TRUE);
+    MoveWindow(g_hWeek, rightX, rTop, rightW, rH, TRUE);
+    SetColumnsWidth(rightW);
+
+    MoveWindow(g_hStatus, S(8), H - S(28), W - S(16), S(28), TRUE);
 }
 
-static void Main_OnNotify(HWND hWnd, LPARAM lParam)
+/* 列表自绘：在“分类”列画分类色圆角块 + 白色分类名 */
+static int TaskCategoryById(int id)
+{
+    for (int i = 1; i <= g_count; i++)
+    {
+        if (g_tasks[i].id == id)
+        {
+            return g_tasks[i].category;
+        }
+    }
+    return CAT_OTHER;
+}
+
+static LRESULT Main_OnCustomDraw(LPNMLVCUSTOMDRAW cd)
+{
+    switch (cd->nmcd.dwDrawStage)
+    {
+    case CDDS_PREPAINT:
+        return CDRF_NOTIFYITEMDRAW;
+
+    case CDDS_ITEMPREPAINT:
+    {
+        /* 偶数行交替底色；选中行保持系统高亮 */
+        int item = (int)cd->nmcd.dwItemSpec;
+        UINT sel = ListView_GetItemState(g_hList, item, LVIS_SELECTED);
+        if (sel & LVIS_SELECTED)
+        {
+            cd->clrTextBk = g_theme->accentSoft;
+            cd->clrText = g_theme->text;
+        }
+        else
+        {
+            cd->clrTextBk = (item % 2 == 1) ? LIST_BG_ALT : g_theme->card;
+        }
+        return CDRF_NOTIFYPOSTPAINT | CDRF_NEWFONT;
+    }
+
+    case CDDS_ITEMPOSTPAINT:
+    {
+        int item = (int)cd->nmcd.dwItemSpec;
+        LVITEMW lvi;
+        ZeroMemory(&lvi, sizeof(lvi));
+        lvi.mask = LVIF_PARAM;
+        lvi.iItem = item;
+        if (!ListView_GetItem(g_hList, &lvi))
+        {
+            return CDRF_DODEFAULT;
+        }
+        int cat = TaskCategoryById((int)lvi.lParam);
+        if (cat < 1 || cat > CAT_COUNT) { cat = CAT_OTHER; }
+
+        RECT rc;
+        if (ListView_GetSubItemRect(g_hList, item, 4, LVIR_BOUNDS, &rc))
+        {
+            HDC hdc = cd->nmcd.hdc;
+            RECT block = rc;
+            InflateRect(&block, -S(5), -S(2));
+            FillRoundedRect(hdc, &block, g_catFill[cat]);
+            HGDIOBJ oldFont = SelectObject(hdc, g_fontBold);
+            int oldBk = SetBkMode(hdc, TRANSPARENT);
+            COLORREF oldColor = SetTextColor(hdc, RGB(255, 255, 255));
+            DrawTextW(hdc, CatStr(cat), -1, &block,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            SetTextColor(hdc, oldColor);
+            SetBkMode(hdc, oldBk);
+            SelectObject(hdc, oldFont);
+        }
+        return CDRF_DODEFAULT;
+    }
+    }
+    return CDRF_DODEFAULT;
+}
+
+static LRESULT Main_OnNotify(HWND hWnd, LPARAM lParam)
 {
     LPNMHDR pnm = (LPNMHDR)lParam;
     if (pnm->idFrom == IDC_LIST)
     {
+        if (pnm->code == NM_CUSTOMDRAW)
+        {
+            return Main_OnCustomDraw((LPNMLVCUSTOMDRAW)lParam);
+        }
         if (pnm->code == LVN_KEYDOWN)
         {
             LPNMLVKEYDOWN pkd = (LPNMLVKEYDOWN)lParam;
@@ -3244,6 +5201,66 @@ static void Main_OnNotify(HWND hWnd, LPARAM lParam)
             }
         }
     }
+    return 0;
+}
+
+/* 月视图 / 周视图分段按钮：跟随主题自绘 */
+static int DrawViewToggle(LPDRAWITEMSTRUCT dis)
+{
+    if (dis == NULL)
+    {
+        return 0;
+    }
+    if (dis->CtlID != IDC_VIEW_MONTH && dis->CtlID != IDC_VIEW_WEEK)
+    {
+        return 0;
+    }
+
+    int selected = (dis->CtlID == IDC_VIEW_MONTH) ?
+        (g_viewMode == VIEW_MONTH) : (g_viewMode == VIEW_WEEK);
+    HDC hdc = dis->hDC;
+    RECT rc = dis->rcItem;
+
+    /* 先铺页面底色，圆角外不会留下旧像素 */
+    HBRUSH bg = CreateSolidBrush(g_theme->page);
+    FillRect(hdc, &rc, bg);
+    DeleteObject(bg);
+
+    RECT r = rc;
+    InflateRect(&r, -S(1), -S(1));
+    int pressed = (dis->itemState & ODS_SELECTED) ? 1 : 0;
+    COLORREF fill = selected ? g_theme->accent : g_theme->card;
+    COLORREF border = selected ? g_theme->accent : g_theme->border;
+    COLORREF txt = selected ? RGB(255, 255, 255) : g_theme->text;
+    if (pressed)
+    {
+        fill = selected ? g_theme->accentDark : g_theme->hover;
+    }
+    FillRoundedRect(hdc, &r, fill);
+    DrawRoundBorder(hdc, &r, border, 0);
+
+    if (dis->itemState & ODS_FOCUS)
+    {
+        RECT f = r;
+        InflateRect(&f, -S(4), -S(4));
+        HPEN pen = CreatePen(PS_DOT, 1, selected ? RGB(255, 255, 255) : g_theme->accent);
+        HGDIOBJ oldPen = SelectObject(hdc, pen);
+        HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        RoundRect(hdc, f.left, f.top, f.right, f.bottom, S(6), S(6));
+        SelectObject(hdc, oldBrush);
+        SelectObject(hdc, oldPen);
+        DeleteObject(pen);
+    }
+
+    wchar_t text[64];
+    GetWindowTextW(dis->hwndItem, text, 64);
+    SetBkMode(hdc, TRANSPARENT);
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontUi);
+    SetTextColor(hdc, txt);
+    DrawTextW(hdc, text, -1, &r,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(hdc, oldFont);
+    return 1;
 }
 
 LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -3260,13 +5277,51 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     case WM_GETMINMAXINFO:
     {
         MINMAXINFO* mmi = (MINMAXINFO*)lParam;
-        mmi->ptMinTrackSize.x = S(980);
+        mmi->ptMinTrackSize.x = S(1020);
         mmi->ptMinTrackSize.y = S(620);
         return 0;
     }
 
+    case WM_ERASEBKGND:
+    {
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        FillRect((HDC)wParam, &rc, g_hBgBrush);
+        return 1;
+    }
+
     case WM_CTLCOLORSTATIC:
-        return (LRESULT)GetStockObject(WHITE_BRUSH);
+    {
+        int id = GetDlgCtrlID((HWND)lParam);
+        SetBkMode((HDC)wParam, TRANSPARENT);
+        if (id == IDC_TIP || id == IDC_STATUS)
+        {
+            SetTextColor((HDC)wParam, g_theme->muted);
+        }
+        else
+        {
+            SetTextColor((HDC)wParam, g_theme->text);
+        }
+        return (LRESULT)g_hBgBrush;
+    }
+
+    case WM_CTLCOLORBTN:
+    {
+        if (GetDlgCtrlID((HWND)lParam) == IDC_CHK_AUTO)
+        {
+            SetBkMode((HDC)wParam, TRANSPARENT);
+            SetTextColor((HDC)wParam, g_theme->text);
+            return (LRESULT)g_hBgBrush;
+        }
+        break;
+    }
+
+    case WM_DRAWITEM:
+        if (DrawViewToggle((LPDRAWITEMSTRUCT)lParam))
+        {
+            return TRUE;
+        }
+        break;
 
     case WM_COMMAND:
         switch (LOWORD(wParam))
@@ -3277,19 +5332,20 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         case IDC_BTN_DELETE:
             DeleteSelected();
             break;
-        case IDC_BTN_TODAY:
-        {
-            SYSTEMTIME now;
-            GetLocalTime(&now);
-            CalSetDate(&now);
-            g_filterMode = 1;
-            g_filterDate = g_calSel;
-            RefreshList();
+        case IDC_VIEW_MONTH:
+            SetViewMode(VIEW_MONTH);
             break;
-        }
-        case IDC_BTN_ALL:
-            g_filterMode = 0;
-            RefreshList();
+        case IDC_VIEW_WEEK:
+            SetViewMode(VIEW_WEEK);
+            break;
+        case IDC_WEEK_PREV:
+            WeekShift(-1);
+            break;
+        case IDC_WEEK_NEXT:
+            WeekShift(1);
+            break;
+        case IDC_WEEK_TODAY:
+            WeekShift(0);
             break;
         case IDC_BTN_SET:
             ShowSettingsDialog();
@@ -3316,8 +5372,7 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         return 0;
 
     case WM_NOTIFY:
-        Main_OnNotify(hWnd, lParam);
-        return 0;
+        return Main_OnNotify(hWnd, lParam);
 
     case WM_TIMER:
         if (wParam == TIMER_CHECK)
@@ -3334,14 +5389,36 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
                 g_lastToday = now;
                 RefreshList();
                 RefreshCalendar();
+                RefreshWeek();
             }
         }
         return 0;
 
     case WM_APP_CAL_SELECT:
-        g_filterMode = 1;
-        g_filterDate = g_calSel;
-        RefreshList();
+        if (g_viewMode == VIEW_WEEK)
+        {
+            /* 周视图下点击日历：跳转到该日期所在周 */
+            g_weekAnchor = g_calSel;
+            g_weekScroll = 0;
+            RefreshWeek();
+        }
+        else
+        {
+            /* 月视图：再次点击已选中的同一天则取消筛选（显示全部） */
+            if (g_filterMode == 1 &&
+                g_filterDate.wYear == g_calSel.wYear &&
+                g_filterDate.wMonth == g_calSel.wMonth &&
+                g_filterDate.wDay == g_calSel.wDay)
+            {
+                g_filterMode = 0;
+            }
+            else
+            {
+                g_filterMode = 1;
+                g_filterDate = g_calSel;
+            }
+            RefreshList();
+        }
         return 0;
 
     case WM_APP_TRAY:
@@ -3407,6 +5484,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     InitPaths();
     LoadSettings();
     g_lang = g_set.lang;
+    if (g_set.theme < 0 || g_set.theme >= THEME_COUNT)
+    {
+        g_set.theme = THEME_DEFAULT;
+    }
+    g_theme = &g_themes[g_set.theme];
+    g_hBgBrush = CreateSolidBrush(g_theme->page);
+    g_hDlgBrush = CreateSolidBrush(g_theme->dialogBg);
 
     /* 单实例 */
     HANDLE hMutex = CreateMutexW(NULL, TRUE, L"TimeManeger_SingleInstance_Mutex_v2");
@@ -3436,7 +5520,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wc.lpfnWndProc = MainWndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+    if (g_hBgBrush == NULL) { g_hBgBrush = CreateSolidBrush(g_theme->page); }
+    wc.hbrBackground = g_hBgBrush;
     wc.lpszClassName = L"TimeManagerMainWnd";
     wc.hIcon = g_hIconLarge;
     wc.hIconSm = g_hIconSmall;
@@ -3490,12 +5575,34 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wcCal.lpszClassName = L"TimeManagerCalendar";
     RegisterClassExW(&wcCal);
 
+    WNDCLASSEXW wcWeek;
+    ZeroMemory(&wcWeek, sizeof(wcWeek));
+    wcWeek.cbSize = sizeof(wcWeek);
+    wcWeek.style = CS_HREDRAW | CS_VREDRAW;
+    wcWeek.lpfnWndProc = WeekWndProc;
+    wcWeek.hInstance = hInstance;
+    wcWeek.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    wcWeek.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wcWeek.lpszClassName = L"TimeManagerWeek";
+    RegisterClassExW(&wcWeek);
+
+    WNDCLASSEXW wcTip;
+    ZeroMemory(&wcTip, sizeof(wcTip));
+    wcTip.cbSize = sizeof(wcTip);
+    wcTip.style = CS_HREDRAW | CS_VREDRAW;
+    wcTip.lpfnWndProc = TipWndProc;
+    wcTip.hInstance = hInstance;
+    wcTip.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    wcTip.hbrBackground = NULL;
+    wcTip.lpszClassName = L"TimeManagerTip";
+    RegisterClassExW(&wcTip);
+
     g_hMain = CreateWindowExW(
         0,
         L"TimeManagerMainWnd",
         Str(STR_APP_TITLE),
         WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, S(1080), S(680),
+        CW_USEDEFAULT, CW_USEDEFAULT, S(1060), S(700),
         NULL, NULL, hInstance, NULL);
     if (g_hMain == NULL)
     {
