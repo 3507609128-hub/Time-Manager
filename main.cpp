@@ -52,6 +52,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #define MAX_TASKS       200
 #define MAX_REMIND      12              /* 每条日程最多 12 条提醒规则 */
+#define REPEAT_MAX_WEEKS 20             /* 连续日程最多 20 周 */
 #define MAX_TOASTS      4               /* 屏幕上最多同时显示 4 条通知 */
 #define MAX_TITLE       64
 #define MAX_NOTE        256
@@ -95,6 +96,7 @@ processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #define IDC_RDEL         2013
 #define IDC_ADD_HINT     2014
 #define IDC_CAT          2015
+#define IDC_REPEAT       2016
 
 /* 设置窗口控件 ID */
 #define IDC_SET_AUTO     3001
@@ -431,6 +433,7 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(APP_TITLE,       L"时间管理器 Time-Manager", L"タイムマネージャー Time-Manager", L"Time-Manager") \
     X(BTN_ADD,         L"添加日程", L"予定を追加", L"Add") \
     X(BTN_DELETE,      L"删除选中", L"選択を削除", L"Delete") \
+    X(BTN_DELETE_N,    L"删除选中 (%d)", L"選択を削除 (%d)", L"Delete (%d)") \
     X(BTN_TODAY,       L"今日", L"今日", L"Today") \
     X(BTN_ALL,         L"全部", L"すべて", L"All") \
     X(BTN_SET,         L"设置", L"設定", L"Settings") \
@@ -456,8 +459,9 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(CANCEL,          L"取消", L"キャンセル", L"Cancel") \
     X(NOTICE,          L"提示", L"ヒント", L"Notice") \
     X(ERR_SAVE,        L"数据文件保存失败，请检查程序目录的写入权限。", L"データファイルを保存できません。プログラムフォルダーの書き込み権限を確認してください。", L"Could not save the data file. Check write permission for the program folder.") \
-    X(NO_SELECTION,    L"请先在列表中单击选中要删除的日程。", L"削除する予定をリストから選択してください。", L"Select an event in the list first.") \
+    X(NO_SELECTION,    L"请先在列表中选中要删除的日程（可按住 Ctrl 多选）。", L"削除する予定をリストから選択してください（Ctrl で複数選択可）。", L"Select one or more events in the list first (Ctrl-click for multiple).") \
     X(CONFIRM_DELETE,  L"确定删除日程「%s」吗？此操作不可恢复。", L"予定「%s」を削除しますか？この操作は元に戻せません。", L"Delete \"%s\"? This cannot be undone.") \
+    X(CONFIRM_DELETE_MULTI, L"确定删除选中的 %d 个日程吗？此操作不可恢复。", L"選択した %d 件の予定を削除しますか？この操作は元に戻せません。", L"Delete the %d selected events? This cannot be undone.") \
     X(CONFIRM_DEL_TITLE, L"确认删除", L"削除の確認", L"Confirm deletion") \
     X(ADD_TITLE,       L"添加日程", L"予定を追加", L"Add event") \
     X(LBL_START,       L"开始：", L"開始：", L"Start:") \
@@ -465,6 +469,10 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(LBL_TITLE,       L"标题：", L"タイトル：", L"Title:") \
     X(LBL_NOTE,        L"备注：", L"メモ：", L"Note:") \
     X(LBL_RULES,       L"提醒规则：", L"通知ルール：", L"Reminders:") \
+    X(LBL_REPEAT,      L"重复：", L"繰り返し：", L"Repeat:") \
+    X(REPEAT_ONCE,     L"单次日程", L"単発の予定", L"Single event") \
+    X(REPEAT_WEEKS,    L"每周重复，连续 %d 周", L"毎週繰り返し（%d 週間）", L"Weekly for %d weeks") \
+    X(ERR_TASK_REPEAT, L"连续日程将超出数量上限，请减少周数。", L"繰り返し予定が上限を超えます。週数を減らしてください。", L"The weekly events would exceed the event limit. Reduce the number of weeks.") \
     X(RULE_ADD,        L"添加规则", L"ルールを追加", L"Add rule") \
     X(RULE_DEL,        L"删除选中", L"選択を削除", L"Remove") \
     X(ADD_HINT,        L"提醒规则可自由添加或删除，最多 12 条；到点会在右下角弹出通知。", L"通知ルールは自由に追加・削除できます（最大 12 件）。時刻になると右下に通知が表示されます。", L"Add or remove reminder rules (up to 12). Notifications appear at the bottom right.") \
@@ -752,6 +760,7 @@ void SaveSettings(void);
 void LoadSettings(void);
 void CheckReminders(void);
 void DeleteSelected(void);
+static void UpdateDeleteButton(void);
 void QueueToast(const struct Task* t, int leadMinutes);
 void ShowAddDialog(void);
 void ShowSettingsDialog(void);
@@ -2011,78 +2020,150 @@ void RefreshList(void)
         FormatStr(buf, 128, STR_STAT_TODAY, now.wMonth, now.wDay, todayCount);
         SetWindowTextW(g_hStatToday, buf);
     }
+    UpdateDeleteButton();
+}
+
+/* 根据列表当前选中数量更新“删除选中”按钮文案（多选时显示数量） */
+static void UpdateDeleteButton(void)
+{
+    if (g_hMain == NULL)
+    {
+        return;
+    }
+    HWND btn = GetDlgItem(g_hMain, IDC_BTN_DELETE);
+    if (btn == NULL)
+    {
+        return;
+    }
+
+    int n = 0;
+    if (g_viewMode == VIEW_MONTH && g_hList != NULL)
+    {
+        n = (int)ListView_GetSelectedCount(g_hList);
+    }
+
+    wchar_t buf[64];
+    if (n > 1)
+    {
+        FormatStr(buf, 64, STR_BTN_DELETE_N, n);
+    }
+    else
+    {
+        StringCchCopyW(buf, 64, Str(STR_BTN_DELETE));
+    }
+    SetWindowTextW(btn, buf);
+    InvalidateRect(btn, NULL, TRUE);
 }
 
 void DeleteSelected(void)
 {
-    int id = 0;
+    int ids[MAX_TASKS];
+    int idCount = 0;
 
     if (g_viewMode == VIEW_WEEK)
     {
         /* 周视图：删除单击选中的方块 */
-        id = g_weekSelId;
-        if (id == 0)
+        if (g_weekSelId == 0)
         {
             MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
                 Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
             return;
         }
+        ids[0] = g_weekSelId;
+        idCount = 1;
     }
     else
     {
-        /* 月视图：删除列表选中行 */
-        int sel = ListView_GetNextItem(g_hList, -1, LVNI_SELECTED);
-        if (sel < 0)
+        /* 月视图：收集列表全部选中行，支持 Ctrl / Shift 多选 */
+        if (ListView_GetSelectedCount(g_hList) == 0)
         {
             MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
                 Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
             return;
         }
 
-        LVITEMW lvi;
-        ZeroMemory(&lvi, sizeof(lvi));
-        lvi.mask = LVIF_PARAM;
-        lvi.iItem = sel;
-        ListView_GetItem(g_hList, &lvi);
-        id = (int)lvi.lParam;
-    }
-
-    int idx = 0;
-    for (int i = 1; i <= g_count; i++)
-    {
-        if (g_tasks[i].id == id)
+        int pos = -1;
+        while ((pos = ListView_GetNextItem(g_hList, pos, LVNI_SELECTED)) >= 0)
         {
-            idx = i;
-            break;
+            if (idCount >= MAX_TASKS)
+            {
+                break;
+            }
+            LVITEMW lvi;
+            ZeroMemory(&lvi, sizeof(lvi));
+            lvi.mask = LVIF_PARAM;
+            lvi.iItem = pos;
+            if (ListView_GetItem(g_hList, &lvi))
+            {
+                ids[idCount++] = (int)lvi.lParam;
+            }
         }
-    }
-    if (idx == 0)
-    {
-        g_weekSelId = 0;
-        RefreshList();
-        RefreshWeek();
-        return;
+        if (idCount == 0)
+        {
+            MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
+                Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
+            return;
+        }
     }
 
     wchar_t msg[300];
-    FormatStr(msg, 300, STR_CONFIRM_DELETE, g_tasks[idx].title);
+    if (idCount == 1)
+    {
+        const wchar_t* title = L"";
+        for (int i = 1; i <= g_count; i++)
+        {
+            if (g_tasks[i].id == ids[0])
+            {
+                title = g_tasks[i].title;
+                break;
+            }
+        }
+        FormatStr(msg, 300, STR_CONFIRM_DELETE, title);
+    }
+    else
+    {
+        FormatStr(msg, 300, STR_CONFIRM_DELETE_MULTI, idCount);
+    }
+
     if (MessageBoxW(g_hMain, msg, Str(STR_CONFIRM_DEL_TITLE),
         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) != IDYES)
     {
         return;
     }
 
-    for (int i = idx; i < g_count; i++)
+    int w = 1;
+    for (int i = 1; i <= g_count; i++)
     {
-        g_tasks[i] = g_tasks[i + 1];
+        int removed = 0;
+        for (int k = 0; k < idCount; k++)
+        {
+            if (g_tasks[i].id == ids[k])
+            {
+                removed = 1;
+                break;
+            }
+        }
+        if (!removed)
+        {
+            g_tasks[w++] = g_tasks[i];
+        }
     }
-    g_count--;
-    if (g_weekSelId == id) { g_weekSelId = 0; }
+    g_count = w - 1;
+
+    for (int k = 0; k < idCount; k++)
+    {
+        if (g_weekSelId == ids[k])
+        {
+            g_weekSelId = 0;
+            break;
+        }
+    }
 
     SaveTasks();
     RefreshList();
     RefreshCalendar();
     RefreshWeek();
+    UpdateDeleteButton();
 }
 
 /*============================= “添加日程”窗口 =============================*/
@@ -2165,28 +2246,43 @@ static BOOL AddDlg_OnCreate(HWND hWnd)
     }
     SendMessageW(g_dlgCat, CB_SETCURSEL, g_dlgCategory - 1, 0);
 
-    CreateLabel(hWnd, Str(STR_LBL_NOTE), S(16), S(142), S(80), S(24));
+    CreateLabel(hWnd, Str(STR_LBL_REPEAT), S(16), S(140), S(80), S(28));
+    HWND hRepeat = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        S(104), S(136), S(260), S(260),
+        hWnd, (HMENU)(LONG_PTR)IDC_REPEAT, g_hInst, NULL);
+    SendMessageW(hRepeat, CB_ADDSTRING, 0, (LPARAM)Str(STR_REPEAT_ONCE));
+    for (int w = 2; w <= REPEAT_MAX_WEEKS; w++)
+    {
+        wchar_t buf[96];
+        FormatStr(buf, 96, STR_REPEAT_WEEKS, w);
+        int idx = (int)SendMessageW(hRepeat, CB_ADDSTRING, 0, (LPARAM)buf);
+        SendMessageW(hRepeat, CB_SETITEMDATA, (WPARAM)idx, (LPARAM)w);
+    }
+    SendMessageW(hRepeat, CB_SETCURSEL, 0, 0);
+
+    CreateLabel(hWnd, Str(STR_LBL_NOTE), S(16), S(186), S(80), S(24));
     g_dlgNote = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE |
         ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL,
-        S(104), S(136), S(400), S(72), hWnd, (HMENU)(LONG_PTR)IDC_NOTE, g_hInst, NULL);
+        S(104), S(180), S(400), S(72), hWnd, (HMENU)(LONG_PTR)IDC_NOTE, g_hInst, NULL);
     SendMessageW(g_dlgNote, EM_SETLIMITTEXT, (WPARAM)(MAX_NOTE - 1), 0);
 
-    CreateLabel(hWnd, Str(STR_LBL_RULES), S(16), S(222), S(400), S(24));
+    CreateLabel(hWnd, Str(STR_LBL_RULES), S(16), S(266), S(400), S(24));
     g_dlgRList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | LBS_NOTIFY | WS_VSCROLL |
         LBS_HASSTRINGS,
-        S(16), S(246), S(488), S(100),
+        S(16), S(290), S(488), S(100),
         hWnd, (HMENU)(LONG_PTR)IDC_RLIST, g_hInst, NULL);
 
     g_dlgRValue = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
-        S(104), S(356), S(64), S(30), hWnd, (HMENU)(LONG_PTR)IDC_RVALUE, g_hInst, NULL);
+        S(104), S(400), S(64), S(30), hWnd, (HMENU)(LONG_PTR)IDC_RVALUE, g_hInst, NULL);
     SetWindowTextW(g_dlgRValue, L"15");
 
     g_dlgRUnit = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(176), S(356), S(110), S(240),
+        S(176), S(400), S(110), S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_RUNIT, g_hInst, NULL);
     SendMessageW(g_dlgRUnit, CB_ADDSTRING, 0, (LPARAM)Str(STR_UNIT_MIN));
     SendMessageW(g_dlgRUnit, CB_ADDSTRING, 0, (LPARAM)Str(STR_UNIT_HOUR));
@@ -2195,19 +2291,19 @@ static BOOL AddDlg_OnCreate(HWND hWnd)
 
     CreateWindowExW(0, L"BUTTON", Str(STR_RULE_ADD),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(296), S(354), S(100), S(32), hWnd, (HMENU)(LONG_PTR)IDC_RADD, g_hInst, NULL);
+        S(296), S(398), S(100), S(32), hWnd, (HMENU)(LONG_PTR)IDC_RADD, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_RULE_DEL),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(404), S(354), S(100), S(32), hWnd, (HMENU)(LONG_PTR)IDC_RDEL, g_hInst, NULL);
+        S(404), S(398), S(100), S(32), hWnd, (HMENU)(LONG_PTR)IDC_RDEL, g_hInst, NULL);
 
-    CreateHint(hWnd, Str(STR_ADD_HINT), S(104), S(398), S(400), S(42), IDC_ADD_HINT);
+    CreateHint(hWnd, Str(STR_ADD_HINT), S(104), S(442), S(400), S(42), IDC_ADD_HINT);
 
     CreateWindowExW(0, L"BUTTON", Str(STR_OK),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-        S(300), S(454), S(100), S(34), hWnd, (HMENU)(LONG_PTR)IDC_OK, g_hInst, NULL);
+        S(300), S(498), S(100), S(34), hWnd, (HMENU)(LONG_PTR)IDC_OK, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_CANCEL),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(408), S(454), S(100), S(34), hWnd, (HMENU)(LONG_PTR)IDC_CANCEL, g_hInst, NULL);
+        S(408), S(498), S(100), S(34), hWnd, (HMENU)(LONG_PTR)IDC_CANCEL, g_hInst, NULL);
 
     /* 默认开始 = 当前时间，结束 = 1 小时后 */
     SYSTEMTIME now, endTime;
@@ -2310,9 +2406,19 @@ static void OnRuleDelete(HWND hWnd)
 
 static void OnAddOk(HWND hWnd)
 {
-    if (g_count >= MAX_TASKS)
+    int repeatSel = (int)SendMessageW(GetDlgItem(hWnd, IDC_REPEAT), CB_GETCURSEL, 0, 0);
+    int weeks = 1;
+    if (repeatSel > 0)
     {
-        ShowNotice(hWnd, STR_ERR_TASK_MAX);
+        weeks = (int)SendMessageW(GetDlgItem(hWnd, IDC_REPEAT),
+            CB_GETITEMDATA, (WPARAM)repeatSel, 0);
+        if (weeks < 2) { weeks = 2; }
+        if (weeks > REPEAT_MAX_WEEKS) { weeks = REPEAT_MAX_WEEKS; }
+    }
+
+    if (g_count + weeks > MAX_TASKS)
+    {
+        ShowNotice(hWnd, weeks == 1 ? STR_ERR_TASK_MAX : STR_ERR_TASK_REPEAT);
         return;
     }
 
@@ -2349,12 +2455,14 @@ static void OnAddOk(HWND hWnd)
     wchar_t note[MAX_NOTE];
     ZeroMemory(title, sizeof(title));
     ZeroMemory(note, sizeof(note));
-    GetWindowTextW(g_dlgTitle, title, MAX_TITLE);
-    GetWindowTextW(g_dlgNote, note, MAX_NOTE);
+    HWND hTitle = GetDlgItem(hWnd, IDC_TITLE);
+    HWND hNote = GetDlgItem(hWnd, IDC_NOTE);
+    GetWindowTextW(hTitle, title, MAX_TITLE);
+    GetWindowTextW(hNote, note, MAX_NOTE);
     if (title[0] == 0)
     {
         ShowNotice(hWnd, STR_ERR_TITLE_EMPTY);
-        SetFocus(g_dlgTitle);
+        SetFocus(hTitle);
         return;
     }
     StringCchCopyW(t.title, MAX_TITLE, title);
@@ -2370,8 +2478,6 @@ static void OnAddOk(HWND hWnd)
         if (t.category < 1 || t.category > CAT_COUNT) { t.category = CAT_DEFAULT; }
     }
 
-    t.id = g_nextId;
-    g_nextId++;
     t.rcount = g_dlgRCount;
     for (int i = 1; i <= g_dlgRCount; i++)
     {
@@ -2382,10 +2488,23 @@ static void OnAddOk(HWND hWnd)
 
     SYSTEMTIME now;
     GetLocalTime(&now);
-    NormalizeRules(&t, DiffSeconds(&now, &t.stStart), 1);
-
-    g_count++;
-    g_tasks[g_count] = t;
+    for (int k = 0; k < weeks; k++)
+    {
+        struct Task nt = t;
+        nt.id = g_nextId++;
+        if (k > 0)
+        {
+            AddDays(&nt.stStart, k * 7);
+            AddDays(&nt.stEnd, k * 7);
+        }
+        for (int i = 1; i <= nt.rcount; i++)
+        {
+            nt.r[i].fired = 0;
+        }
+        NormalizeRules(&nt, DiffSeconds(&now, &nt.stStart), 1);
+        g_count++;
+        g_tasks[g_count] = nt;
+    }
     SortTasks();
     SaveTasks();
     RefreshList();
@@ -2460,7 +2579,7 @@ void ShowAddDialog(void)
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     DWORD exStyle = WS_EX_DLGMODALFRAME;
     RECT wr;
-    SetRect(&wr, 0, 0, S(520), S(506));
+    SetRect(&wr, 0, 0, S(520), S(546));
     AdjustWindowRectEx(&wr, style, FALSE, exStyle);
 
     g_hAdd = CreateWindowExW(
@@ -4826,6 +4945,7 @@ void ApplyLanguage(void)
     SetWindowTextW(g_hMain, Str(STR_APP_TITLE));
     SetChildText(g_hMain, IDC_BTN_ADD, STR_BTN_ADD);
     SetChildText(g_hMain, IDC_BTN_DELETE, STR_BTN_DELETE);
+    UpdateDeleteButton();
     SetChildText(g_hMain, IDC_BTN_SET, STR_BTN_SET);
     SetChildText(g_hMain, IDC_VIEW_MONTH, STR_VIEW_MONTH);
     SetChildText(g_hMain, IDC_VIEW_WEEK, STR_VIEW_WEEK);
@@ -4955,7 +5075,7 @@ static int Main_OnCreate(HWND hWnd)
 
     /* 右侧：月视图日程列表 */
     g_hList = CreateWindowExW(0, WC_LISTVIEWW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL |
+        WS_CHILD | WS_VISIBLE | LVS_REPORT |
         LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
         S(374), S(54), S(600), S(400),
         hWnd, (HMENU)(LONG_PTR)IDC_LIST, g_hInst, NULL);
@@ -5065,6 +5185,7 @@ void SetViewMode(int mode)
     {
         RefreshList();
     }
+    UpdateDeleteButton();
 }
 
 static void Main_OnSize(HWND hWnd, int W, int H)
@@ -5192,10 +5313,25 @@ static LRESULT Main_OnNotify(HWND hWnd, LPARAM lParam)
         {
             return Main_OnCustomDraw((LPNMLVCUSTOMDRAW)lParam);
         }
+        if (pnm->code == LVN_ITEMCHANGED)
+        {
+            UpdateDeleteButton();
+        }
         if (pnm->code == LVN_KEYDOWN)
         {
             LPNMLVKEYDOWN pkd = (LPNMLVKEYDOWN)lParam;
-            if (pkd->wVKey == VK_DELETE)
+            if (pkd->wVKey == 'A' && (GetKeyState(VK_CONTROL) & 0x8000))
+            {
+                /* Ctrl+A：全选当前列表（只作用于筛选后可见的行） */
+                ListView_SetItemState(g_hList, -1, LVIS_SELECTED, LVIS_SELECTED);
+                UpdateDeleteButton();
+            }
+            else if (pkd->wVKey == VK_ESCAPE)
+            {
+                ListView_SetItemState(g_hList, -1, 0, LVIS_SELECTED);
+                UpdateDeleteButton();
+            }
+            else if (pkd->wVKey == VK_DELETE)
             {
                 DeleteSelected();
             }
