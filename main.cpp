@@ -444,6 +444,7 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(LIST_DAY,        L"星期", L"曜日", L"Day") \
     X(LIST_START,      L"开始", L"開始", L"Start") \
     X(LIST_END,        L"结束", L"終了", L"End") \
+    X(LIST_TIME,       L"时间", L"時間", L"Time") \
     X(LIST_TITLE,      L"标题", L"タイトル", L"Title") \
     X(LIST_NOTE,       L"备注", L"メモ", L"Note") \
     X(LIST_REMIND,     L"提醒", L"通知", L"Remind") \
@@ -545,6 +546,9 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(WEEK_RANGE,      L"%d/%d – %d/%d", L"%d/%d – %d/%d", L"%d/%d – %d/%d") \
     X(WEEK_NO_EVENT,   L"本周暂无日程", L"今週の予定はありません", L"No events this week") \
     X(DAY_EVENT_COUNT, L"%d 个日程", L"%d 件の予定", L"%d events") \
+    X(AGENDA_EMPTY,    L"还没有日程，点右上角「添加日程」新增一条", L"予定はまだありません。右上の「予定を追加」から作成できます", L"No events yet — use \"Add\" at the top right") \
+    X(AGENDA_EMPTY_DAY, L"这一天还没有安排，再点一次日期可取消筛选", L"この日の予定はありません。日付をもう一度押すと絞り込みを解除します", L"Nothing planned for this day. Click the date again to clear the filter") \
+    X(AGENDA_TODAY,    L"今天", L"今日", L"Today") \
     X(TIP_CAT,         L"分类：%s", L"カテゴリー：%s", L"Category: %s") \
     X(TIP_TIME,        L"%s %s – %s", L"%s %s – %s", L"%s %s – %s") \
     X(TIP_REMIND,      L"提醒：%d 次", L"通知：%d 回", L"Reminders: %d") \
@@ -693,6 +697,19 @@ static int SameDate(const SYSTEMTIME* a, const SYSTEMTIME* b)
     return a->wYear == b->wYear && a->wMonth == b->wMonth && a->wDay == b->wDay;
 }
 
+/* 只填了年月日的 SYSTEMTIME，把星期字段补正确（wDayOfWeek 常被漏填，
+   会让“所在周的周一”算错，周视图列头因此随选中日期漂移） */
+static void NormalizeWeekday(SYSTEMTIME* st)
+{
+    FILETIME ft;
+    SYSTEMTIME out;
+    st->wDayOfWeek = 0;
+    if (SystemTimeToFileTime(st, &ft) && FileTimeToSystemTime(&ft, &out))
+    {
+        *st = out;
+    }
+}
+
 /* 日期加减整数天，结果写回 st */
 static void AddDays(SYSTEMTIME* st, int delta)
 {
@@ -714,7 +731,8 @@ static void AddDays(SYSTEMTIME* st, int delta)
 static void MondayOfDate(const SYSTEMTIME* date, SYSTEMTIME* monday)
 {
     *monday = *date;
-    int dow = date->wDayOfWeek;     /* 0=周日 ... 6=周六 */
+    NormalizeWeekday(monday);
+    int dow = monday->wDayOfWeek;     /* 0=周日 ... 6=周六 */
     int delta = (dow == 0) ? -6 : (1 - dow);
     AddDays(monday, delta);
 }
@@ -744,6 +762,7 @@ LRESULT CALLBACK SetDlgProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK ToastProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK CalWndProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK WeekWndProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK AgendaWndProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK TipWndProc(HWND, UINT, WPARAM, LPARAM);
 
 static ULONGLONG SysTimeToU64(const SYSTEMTIME* st);
@@ -1904,7 +1923,105 @@ static void ShowMainWindow(void)
     SetForegroundWindow(g_hMain);
 }
 
-/*============================= 主列表 =============================*/
+/*============================= 主列表（月视图活动流） =============================*/
+
+/* 自绘活动流：按日期分组，每个日程只占一行。
+   行内顺序：分类色点 · 时间段 · 标题 · 备注；分组标题右侧显示当天日程数。
+   去掉了表头、网格线和“提醒次数”列，完整信息通过悬停气泡查看；
+   点击选中，Ctrl 加减选，Shift 连选，“删除选中”按钮和 Delete 键共用一套选择集。 */
+
+#define AG_ROW_H      S(40)
+#define AG_HEAD_H     S(28)
+#define AG_GROUP_GAP  S(16)
+#define AG_PAD_X      S(18)
+#define AG_MAX_ITEMS  (MAX_TASKS * 2 + 8)
+
+struct AgItem
+{
+    int kind;           /* 0=日期标题，1=日程行 */
+    int taskIndex;      /* kind==1 时对应 g_tasks 下标 */
+    int group;          /* 所属分组（1..g_agGroupCount） */
+    RECT rc;
+};
+
+struct AgGroup
+{
+    SYSTEMTIME date;
+    int count;
+};
+
+static struct AgItem g_ag[AG_MAX_ITEMS];
+static int g_agCount = 0;
+static int g_agRows = 0;                 /* 可见日程行数（状态栏用） */
+static struct AgGroup g_agGroups[MAX_TASKS + 2];
+static int g_agGroupCount = 0;
+static int g_agContentH = 0;
+static int g_agScroll = 0;
+static int g_agHover = -1;               /* 悬停条目下标（-1 表示无） */
+static int g_agTracking = 0;
+static int g_agAnchor = -1;              /* Shift 连选锚点（条目下标） */
+static int g_agSelIds[MAX_TASKS + 1];
+static int g_agSelCount = 0;
+
+static int AgIsSelected(int taskId)
+{
+    for (int i = 0; i < g_agSelCount; i++)
+    {
+        if (g_agSelIds[i] == taskId)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void AgAddSelected(int taskId)
+{
+    if (taskId <= 0 || g_agSelCount >= MAX_TASKS || AgIsSelected(taskId))
+    {
+        return;
+    }
+    g_agSelIds[g_agSelCount++] = taskId;
+}
+
+static void AgRemoveSelected(int taskId)
+{
+    for (int i = 0; i < g_agSelCount; i++)
+    {
+        if (g_agSelIds[i] == taskId)
+        {
+            for (int k = i; k + 1 < g_agSelCount; k++)
+            {
+                g_agSelIds[k] = g_agSelIds[k + 1];
+            }
+            g_agSelCount--;
+            return;
+        }
+    }
+}
+
+static void AgClearSelection(void)
+{
+    g_agSelCount = 0;
+    g_agAnchor = -1;
+}
+
+static int AgSelectionCount(void)
+{
+    return g_agSelCount;
+}
+
+static void AgSelectAll(void)
+{
+    AgClearSelection();
+    for (int i = 0; i < g_agCount; i++)
+    {
+        if (g_ag[i].kind == 1)
+        {
+            AgAddSelected(g_tasks[g_ag[i].taskIndex].id);
+        }
+    }
+}
 
 static int TaskOnFilter(const struct Task* t)
 {
@@ -1917,23 +2034,168 @@ static int TaskOnFilter(const struct Task* t)
            t->stStart.wDay == g_filterDate.wDay;
 }
 
-static void SetColumnsWidth(int listWidth)
+/* 重建条目：任务已按开始时间排序，同一日期自然聚成一组 */
+static void AgendaRebuild(void)
 {
-    int fixed = S(96) + S(60) + S(50) + S(50) + S(72) + S(146) + S(60);
-    int noteWidth = listWidth - fixed - S(24);
-    if (noteWidth < S(70))
+    g_agCount = 0;
+    g_agRows = 0;
+    g_agGroupCount = 0;
+    g_agHover = -1;
+    AgClearSelection();
+
+    int group = 0;
+    for (int i = 1; i <= g_count; i++)
     {
-        noteWidth = S(70);
+        struct Task* t = &g_tasks[i];
+        if (!TaskOnFilter(t))
+        {
+            continue;
+        }
+        if (group == 0 || !SameDate(&g_agGroups[group].date, &t->stStart))
+        {
+            if (g_agGroupCount >= MAX_TASKS + 1 || g_agCount + 2 > AG_MAX_ITEMS)
+            {
+                break;
+            }
+            group = ++g_agGroupCount;
+            g_agGroups[group].date = t->stStart;
+            g_agGroups[group].count = 0;
+
+            struct AgItem* head = &g_ag[g_agCount++];
+            head->kind = 0;
+            head->taskIndex = 0;
+            head->group = group;
+            SetRect(&head->rc, 0, 0, 0, 0);
+        }
+        if (g_agCount >= AG_MAX_ITEMS)
+        {
+            break;
+        }
+        struct AgItem* it = &g_ag[g_agCount++];
+        it->kind = 1;
+        it->taskIndex = i;
+        it->group = group;
+        SetRect(&it->rc, 0, 0, 0, 0);
+        g_agGroups[group].count++;
+        g_agRows++;
     }
-    ListView_SetColumnWidth(g_hList, 0, S(96));
-    ListView_SetColumnWidth(g_hList, 1, S(60));
-    ListView_SetColumnWidth(g_hList, 2, S(50));
-    ListView_SetColumnWidth(g_hList, 3, S(50));
-    ListView_SetColumnWidth(g_hList, 4, S(72));
-    ListView_SetColumnWidth(g_hList, 5, S(146));
-    ListView_SetColumnWidth(g_hList, 6, noteWidth);
-    ListView_SetColumnWidth(g_hList, 7, S(60));
-    ListView_SetColumnWidth(g_hList, 8, 0);
+}
+
+static void AgendaLayout(HWND h)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    int W = rc.right;
+    if (W < S(120))
+    {
+        W = S(120);
+    }
+
+    int y = S(12);
+    for (int i = 0; i < g_agCount; i++)
+    {
+        struct AgItem* it = &g_ag[i];
+        if (it->kind == 0)
+        {
+            if (it->group > 1)
+            {
+                y += AG_GROUP_GAP;
+            }
+            it->rc.left = AG_PAD_X;
+            it->rc.right = W - AG_PAD_X;
+            it->rc.top = y;
+            it->rc.bottom = y + AG_HEAD_H;
+            y += AG_HEAD_H;
+        }
+        else
+        {
+            it->rc.left = AG_PAD_X;
+            it->rc.right = W - AG_PAD_X;
+            it->rc.top = y;
+            it->rc.bottom = y + AG_ROW_H;
+            y += AG_ROW_H;
+        }
+    }
+    g_agContentH = y + S(14);
+}
+
+static void AgClampScroll(HWND h)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    int maxS = g_agContentH - rc.bottom;
+    if (maxS < 0)
+    {
+        maxS = 0;
+    }
+    if (g_agScroll > maxS)
+    {
+        g_agScroll = maxS;
+    }
+    if (g_agScroll < 0)
+    {
+        g_agScroll = 0;
+    }
+}
+
+static void AgUpdateScrollBar(HWND h)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    if (rc.bottom <= 0)
+    {
+        return;
+    }
+    int need = (g_agContentH > rc.bottom) ? 1 : 0;
+    ShowScrollBar(h, SB_VERT, need);       /* 内容不足一屏时隐藏滚动条，画面更干净 */
+    if (!need)
+    {
+        g_agScroll = 0;
+    }
+
+    SCROLLINFO si;
+    ZeroMemory(&si, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin = 0;
+    si.nMax = (g_agContentH > 0) ? (g_agContentH - 1) : 0;
+    si.nPage = rc.bottom;
+    si.nPos = g_agScroll;
+    SetScrollInfo(h, SB_VERT, &si, TRUE);
+}
+
+static void AgendaRelayout(HWND h)
+{
+    if (h == NULL)
+    {
+        return;
+    }
+    AgendaLayout(h);
+    AgClampScroll(h);
+    AgUpdateScrollBar(h);      /* 可能连带改变客户区宽度，Layout 会再次触发 */
+    InvalidateRect(h, NULL, FALSE);
+}
+
+/* 命中测试：返回条目下标（含日期标题），无命中返回 -1 */
+static int AgendaHitTest(int x, int y, RECT* outRc)
+{
+    POINT pt;
+    pt.x = x;
+    pt.y = y;
+    for (int i = 0; i < g_agCount; i++)
+    {
+        RECT r = g_ag[i].rc;
+        OffsetRect(&r, 0, -g_agScroll);
+        if (PtInRect(&r, pt))
+        {
+            if (outRc != NULL)
+            {
+                *outRc = r;
+            }
+            return i;
+        }
+    }
+    return -1;
 }
 
 static void RefreshCalendar(void)
@@ -1946,15 +2208,10 @@ static void RefreshCalendar(void)
 
 void RefreshList(void)
 {
-    SendMessageW(g_hList, WM_SETREDRAW, FALSE, 0);
-    ListView_DeleteAllItems(g_hList);
-
-    int shown = 0;
     int todayCount = 0;
     SYSTEMTIME now;
     GetLocalTime(&now);
 
-    int row = 0;
     for (int i = 1; i <= g_count; i++)
     {
         struct Task* t = &g_tasks[i];
@@ -1963,39 +2220,16 @@ void RefreshList(void)
         {
             todayCount++;
         }
-        if (!TaskOnFilter(t))
-        {
-            continue;
-        }
-
-        wchar_t date[32], tm1[16], tm2[16], rc[16], idStr[16];
-        FmtDate(&t->stStart, date, 32);
-        FmtTime(&t->stStart, tm1, 16);
-        FmtTime(&t->stEnd, tm2, 16);
-        FormatStr(rc, 16, STR_REMIND_COUNT, t->rcount);
-        StringCchPrintfW(idStr, 16, L"%d", t->id);
-
-        LVITEMW lvi;
-        ZeroMemory(&lvi, sizeof(lvi));
-        lvi.mask = LVIF_TEXT | LVIF_PARAM;
-        lvi.iItem = row;
-        lvi.iSubItem = 0;
-        lvi.pszText = date;
-        lvi.lParam = (LPARAM)t->id;
-        ListView_InsertItem(g_hList, &lvi);
-        ListView_SetItemText(g_hList, row, 1, (LPWSTR)g_weekFull[g_lang][t->stStart.wDayOfWeek]);
-        ListView_SetItemText(g_hList, row, 2, tm1);
-        ListView_SetItemText(g_hList, row, 3, tm2);
-        ListView_SetItemText(g_hList, row, 4, (LPWSTR)CatStr(t->category));
-        ListView_SetItemText(g_hList, row, 5, t->title);
-        ListView_SetItemText(g_hList, row, 6, t->note);
-        ListView_SetItemText(g_hList, row, 7, rc);
-        ListView_SetItemText(g_hList, row, 8, idStr);
-        row++;
-        shown++;
     }
 
-    SendMessageW(g_hList, WM_SETREDRAW, TRUE, 0);
+    AgendaRebuild();
+    if (g_hList != NULL)
+    {
+        AgendaLayout(g_hList);
+        g_agScroll = 0;
+        AgUpdateScrollBar(g_hList);
+        InvalidateRect(g_hList, NULL, FALSE);
+    }
 
     if (g_hStatus != NULL)
     {
@@ -2009,7 +2243,7 @@ void RefreshList(void)
             wchar_t date[32];
             FmtDate(&g_filterDate, date, 32);
             FormatStr(status, MAX_PATH + 200, STR_STATUS_FILTER,
-                date, g_weekFull[g_lang][g_filterDate.wDayOfWeek], shown);
+                date, g_weekFull[g_lang][g_filterDate.wDayOfWeek], g_agRows);
         }
         SetWindowTextW(g_hStatus, status);
     }
@@ -2039,7 +2273,7 @@ static void UpdateDeleteButton(void)
     int n = 0;
     if (g_viewMode == VIEW_MONTH && g_hList != NULL)
     {
-        n = (int)ListView_GetSelectedCount(g_hList);
+        n = AgSelectionCount();
     }
 
     wchar_t buf[64];
@@ -2074,35 +2308,16 @@ void DeleteSelected(void)
     }
     else
     {
-        /* 月视图：收集列表全部选中行，支持 Ctrl / Shift 多选 */
-        if (ListView_GetSelectedCount(g_hList) == 0)
+        /* 月视图：取活动流的选择集（支持 Ctrl / Shift 多选） */
+        if (g_agSelCount == 0)
         {
             MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
                 Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
             return;
         }
-
-        int pos = -1;
-        while ((pos = ListView_GetNextItem(g_hList, pos, LVNI_SELECTED)) >= 0)
+        for (int k = 0; k < g_agSelCount && idCount < MAX_TASKS; k++)
         {
-            if (idCount >= MAX_TASKS)
-            {
-                break;
-            }
-            LVITEMW lvi;
-            ZeroMemory(&lvi, sizeof(lvi));
-            lvi.mask = LVIF_PARAM;
-            lvi.iItem = pos;
-            if (ListView_GetItem(g_hList, &lvi))
-            {
-                ids[idCount++] = (int)lvi.lParam;
-            }
-        }
-        if (idCount == 0)
-        {
-            MessageBoxW(g_hMain, Str(STR_NO_SELECTION),
-                Str(STR_NOTICE), MB_OK | MB_ICONINFORMATION);
-            return;
+            ids[idCount++] = g_agSelIds[k];
         }
     }
 
@@ -3073,6 +3288,7 @@ struct CalLayout
     int cellW;
     int cellH;
     int gridTop;
+    int rows;
     RECT prev;
     RECT next;
 };
@@ -3168,11 +3384,17 @@ static void CalGetLayout(HWND h, struct CalLayout* L)
         L->cellW = 1;
     }
     L->gridTop = CAL_HEADER_H + CAL_WEEK_H;
-    L->cellH = (L->H - L->gridTop - S(2)) / 6;
-    if (L->cellH < 1)
-    {
-        L->cellH = 1;
-    }
+    /* 按当月实际需要的周数（4–6 行）均分高度，避免 5 行月份底部留下整行空白 */
+    L->rows = (FirstWeekday(g_calYear, g_calMonth) + DaysInMonth(g_calYear, g_calMonth) + 6) / 7;
+    if (L->rows < 4) { L->rows = 4; }
+    if (L->rows > 6) { L->rows = 6; }
+    int avail = L->H - L->gridTop - S(2);
+    if (avail < 1) { avail = 1; }
+    L->cellH = avail / L->rows;
+    if (L->cellH > S(64)) { L->cellH = S(64); }
+    if (L->cellH < 1) { L->cellH = 1; }
+    /* 行数较少时把网格垂直居中，而不是全部堆在顶部 */
+    L->gridTop += (avail - L->cellH * L->rows) / 2;
     SetRect(&L->prev, L->pad, S(4), L->pad + S(30), CAL_HEADER_H - S(2));
     SetRect(&L->next, L->W - L->pad - S(30), S(4), L->W - L->pad, CAL_HEADER_H - S(2));
 }
@@ -3381,7 +3603,7 @@ static void CalPaint(HWND h)
     int first = FirstWeekday(g_calYear, g_calMonth);
     int dim = DaysInMonth(g_calYear, g_calMonth);
 
-    for (int row = 0; row < 6; row++)
+    for (int row = 0; row < L.rows; row++)
     {
         for (int col = 0; col < 7; col++)
         {
@@ -3448,14 +3670,10 @@ static void CalPaint(HWND h)
                 else if (col == 6) { textColor = CAL_SAT; }
             }
 
-            /* 日期数字：有活动时靠上，底部留位画分类圆点 */
+            /* 日期数字统一垂直居中；有活动时圆点单独画在格子底部，保证整行数字对齐 */
             wchar_t num[8];
             StringCchPrintfW(num, 8, L"%d", day);
             RECT numRect = cell;
-            if (hasTask)
-            {
-                numRect.bottom = cell.bottom - S(15);
-            }
             SelectObject(mem, font);
             SetTextColor(mem, textColor);
             DrawTextW(mem, num, -1, &numRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -3495,7 +3713,7 @@ static int CalPointToDay(const struct CalLayout* L, int x, int y,
     }
     int col = (x - L->pad) / L->cellW;
     int row = (y - L->gridTop) / L->cellH;
-    if (col < 0 || col > 6 || row < 0 || row > 5)
+    if (col < 0 || col > 6 || row < 0 || row >= L->rows)
     {
         return 0;
     }
@@ -3750,6 +3968,7 @@ LRESULT CALLBACK CalWndProc(HWND h, UINT message, WPARAM wParam, LPARAM lParam)
             st.wYear = (WORD)yy;
             st.wMonth = (WORD)mm;
             st.wDay = (WORD)dd;
+            NormalizeWeekday(&st);
             g_calSel = st;
             InvalidateRect(h, NULL, FALSE);
             CalNotify(h);
@@ -4846,26 +5065,6 @@ static void SetChildText(HWND parent, int id, int strId)
     }
 }
 
-static void ApplyListHeaders(void)
-{
-    static const int ids[9] = {
-        STR_LIST_DATE, STR_LIST_DAY, STR_LIST_START, STR_LIST_END,
-        STR_LIST_CAT, STR_LIST_TITLE, STR_LIST_NOTE, STR_LIST_REMIND, -1
-    };
-    if (g_hList == NULL)
-    {
-        return;
-    }
-    for (int i = 0; i < 9; i++)
-    {
-        LVCOLUMNW lvc;
-        ZeroMemory(&lvc, sizeof(lvc));
-        lvc.mask = LVCF_TEXT;
-        lvc.pszText = (LPWSTR)(ids[i] >= 0 ? Str(ids[i]) : L"");
-        ListView_SetColumn(g_hList, i, &lvc);
-    }
-}
-
 /* 应用界面风格：只改颜色，不重建字体/控件 */
 void ApplyTheme(void)
 {
@@ -4900,9 +5099,6 @@ void ApplyTheme(void)
 
     if (g_hList != NULL)
     {
-        ListView_SetBkColor(g_hList, g_theme->card);
-        ListView_SetTextBkColor(g_hList, g_theme->card);
-        ListView_SetTextColor(g_hList, g_theme->text);
         InvalidateRect(g_hList, NULL, TRUE);
     }
 
@@ -4969,7 +5165,6 @@ void ApplyLanguage(void)
         SetWindowTextW(g_hTip, Str(STR_TIP));
     }
 
-    ApplyListHeaders();
     RefreshList();
     RefreshCalendar();
     RefreshWeek();
@@ -5073,36 +5268,11 @@ static int Main_OnCreate(HWND hWnd)
         S(366), S(54), 1, S(600),
         hWnd, (HMENU)(LONG_PTR)IDC_SEPARATOR, g_hInst, NULL);
 
-    /* 右侧：月视图日程列表 */
-    g_hList = CreateWindowExW(0, WC_LISTVIEWW, L"",
-        WS_CHILD | WS_VISIBLE | LVS_REPORT |
-        LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,
+    /* 右侧：月视图活动流（自绘，无表头） */
+    g_hList = CreateWindowExW(0, L"TimeManagerAgenda", L"",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP,
         S(374), S(54), S(600), S(400),
         hWnd, (HMENU)(LONG_PTR)IDC_LIST, g_hInst, NULL);
-    ListView_SetExtendedListViewStyle(g_hList,
-        LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
-    ListView_SetBkColor(g_hList, g_theme->card);
-    ListView_SetTextBkColor(g_hList, g_theme->card);
-    ListView_SetTextColor(g_hList, g_theme->text);
-
-    static const int headerIds[9] = {
-        STR_LIST_DATE, STR_LIST_DAY, STR_LIST_START, STR_LIST_END,
-        STR_LIST_CAT, STR_LIST_TITLE, STR_LIST_NOTE, STR_LIST_REMIND, -1
-    };
-    int widths[9] = {
-        S(96), S(60), S(50), S(50), S(72), S(146), S(120), S(60), 0
-    };
-    for (int i = 0; i < 9; i++)
-    {
-        LVCOLUMNW lvc;
-        ZeroMemory(&lvc, sizeof(lvc));
-        lvc.mask = LVCF_FMT | LVCF_WIDTH | LVCF_TEXT | LVCF_SUBITEM;
-        lvc.fmt = LVCFMT_LEFT;
-        lvc.iSubItem = i;
-        lvc.cx = widths[i];
-        lvc.pszText = (LPWSTR)(headerIds[i] >= 0 ? Str(headerIds[i]) : L"");
-        ListView_InsertColumn(g_hList, i, &lvc);
-    }
 
     /* 右侧：周视图时间网格（初始隐藏） */
     g_hWeek = CreateWindowExW(0, L"TimeManagerWeek", L"",
@@ -5131,6 +5301,7 @@ static int Main_OnCreate(HWND hWnd)
 /* 切换月视图 / 周视图 */
 void SetViewMode(int mode)
 {
+    int prevMode = g_viewMode;
     g_viewMode = mode;
     g_weekSelId = 0;     /* 切换视图时清除周视图选中 */
     if (g_hBtnViewMonth != NULL)
@@ -5174,6 +5345,11 @@ void SetViewMode(int mode)
 
     if (mode == VIEW_WEEK)
     {
+        /* 从月视图进入时，周视图跟随日历里选中的日期（默认是今天） */
+        if (prevMode != VIEW_WEEK && g_calSel.wYear >= 1601)
+        {
+            g_weekAnchor = g_calSel;
+        }
         if (g_hWeek != NULL)
         {
             g_weekScroll = WeekDefaultScroll();
@@ -5226,118 +5402,601 @@ static void Main_OnSize(HWND hWnd, int W, int H)
     int rH = bottom - rTop;
     MoveWindow(g_hList, rightX, rTop, rightW, rH, TRUE);
     MoveWindow(g_hWeek, rightX, rTop, rightW, rH, TRUE);
-    SetColumnsWidth(rightW);
+    AgendaRelayout(g_hList);
 
     MoveWindow(g_hStatus, S(8), H - S(28), W - S(16), S(28), TRUE);
 }
 
-/* 列表自绘：在“分类”列画分类色圆角块 + 白色分类名 */
-static int TaskCategoryById(int id)
+/*========================= 活动流自绘 =========================*/
+
+/* 月视图右侧不再是五列表格，而是按日期分组的一列日程：
+   分组标题一行，每个日程一行（时间段 · 分类色点 · 标题 · 备注），
+   提醒次数等完整信息收进悬停气泡；点击选中 / Ctrl 加选 / Shift 连选，
+   选中集合与“删除选中”按钮、Delete 键共用。 */
+
+#define AG_GROUP 0
+#define AG_ITEM  1
+
+/* 分组标题文本：“10/26 一” */
+static void FmtAgendaDate(const SYSTEMTIME* st, wchar_t* buf, int cch)
 {
-    for (int i = 1; i <= g_count; i++)
-    {
-        if (g_tasks[i].id == id)
-        {
-            return g_tasks[i].category;
-        }
-    }
-    return CAT_OTHER;
+    StringCchPrintfW(buf, cch, L"%d/%d  %s", st->wMonth, st->wDay,
+        g_weekShort[g_lang][st->wDayOfWeek]);
 }
 
-static LRESULT Main_OnCustomDraw(LPNMLVCUSTOMDRAW cd)
+/* 时间段文本：“09:30 – 10:30” */
+static void FmtAgendaTime(const SYSTEMTIME* s, const SYSTEMTIME* e, wchar_t* buf, int cch)
 {
-    switch (cd->nmcd.dwDrawStage)
-    {
-    case CDDS_PREPAINT:
-        return CDRF_NOTIFYITEMDRAW;
+    wchar_t t1[16], t2[16];
+    FmtTime(s, t1, 16);
+    FmtTime(e, t2, 16);
+    StringCchPrintfW(buf, cch, L"%s – %s", t1, t2);
+}
 
-    case CDDS_ITEMPREPAINT:
+/* 分组标题：今天的日期用强调色，右侧弱化显示当天日程数 */
+static void DrawAgendaHeader(HDC dc, struct AgItem* it, int W)
+{
+    struct AgGroup* g = &g_agGroups[it->group];
+    SYSTEMTIME today;
+    GetLocalTime(&today);
+    int isToday = SameDate(&g->date, &today);
+
+    wchar_t date[64];
+    FmtAgendaDate(&g->date, date, 64);
+
+    RECT r = it->rc;
+    r.left = AG_PAD_X;
+    r.right = W - AG_PAD_X;
+
+    int x = AG_PAD_X;
+    HGDIOBJ of = SelectObject(dc, g_fontBold);
+    if (isToday)
     {
-        /* 偶数行交替底色；选中行保持系统高亮 */
-        int item = (int)cd->nmcd.dwItemSpec;
-        UINT sel = ListView_GetItemState(g_hList, item, LVIS_SELECTED);
-        if (sel & LVIS_SELECTED)
+        const wchar_t* label = Str(STR_AGENDA_TODAY);
+        SIZE sz;
+        GetTextExtentPoint32W(dc, label, lstrlenW(label), &sz);
+        RECT tr;
+        tr.left = x;
+        tr.top = r.top;
+        tr.right = x + sz.cx + S(2);
+        tr.bottom = r.bottom;
+        SetTextColor(dc, g_theme->accent);
+        DrawTextW(dc, label, -1, &tr,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        x += sz.cx + S(8);
+    }
+
+    {
+        SIZE sz;
+        GetTextExtentPoint32W(dc, date, lstrlenW(date), &sz);
+        RECT tr;
+        tr.left = x;
+        tr.top = r.top;
+        tr.right = x + sz.cx + S(2);
+        tr.bottom = r.bottom;
+        SetTextColor(dc, g_theme->text);
+        DrawTextW(dc, date, -1, &tr,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    }
+    SelectObject(dc, of);
+
+    if (g->count > 0)
+    {
+        wchar_t cnt[48];
+        FormatStr(cnt, 48, STR_DAY_EVENT_COUNT, g->count);
+        of = SelectObject(dc, g_fontStatus);
+        SetTextColor(dc, CAL_MUTED);
+        RECT cr = r;
+        cr.right = W - AG_PAD_X;
+        DrawTextW(dc, cnt, -1, &cr,
+            DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, of);
+    }
+}
+
+/* 单行日程：时间（弱化）→ 标题（正常字重）→ 备注（小号淡色），
+   彩色圆点代替“分类”列，选中行铺主题浅色底，悬停行铺浅色底 */
+static void DrawAgendaRow(HDC dc, struct AgItem* it, int hovered)
+{
+    struct Task* t = &g_tasks[it->taskIndex];
+    RECT r = it->rc;
+    int cy = (r.top + r.bottom) / 2;
+    const int textLeft = AG_PAD_X + S(16);
+
+    if (AgIsSelected(t->id))
+    {
+        FillRoundedRect(dc, &r, g_theme->accentSoft);
+    }
+    else if (hovered)
+    {
+        FillRoundedRect(dc, &r, g_theme->hover);
+    }
+
+    int cat = t->category;
+    if (cat < 1 || cat > CAT_COUNT)
+    {
+        cat = CAT_OTHER;
+    }
+    FillDot(dc, AG_PAD_X + S(5), cy, S(3), g_catFill[cat]);
+
+    wchar_t tm[40];
+    FmtAgendaTime(&t->stStart, &t->stEnd, tm, 40);
+    RECT tr;
+    tr.left = textLeft;
+    tr.top = r.top;
+    tr.right = textLeft + S(118);
+    tr.bottom = r.bottom;
+    HGDIOBJ of = SelectObject(dc, g_fontStatus);
+    SetTextColor(dc, CAL_MUTED);
+    DrawTextW(dc, tm, -1, &tr,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+    SelectObject(dc, of);
+
+    RECT nr;
+    nr.left = tr.right + S(10);
+    nr.top = r.top;
+    nr.right = r.right - S(6);
+    nr.bottom = r.bottom;
+    if (nr.right <= nr.left)
+    {
+        return;
+    }
+
+    int titleW = 0;
+    if (t->title[0] != L'\0')
+    {
+        int maxTitle = (int)((long)(nr.right - nr.left) * 62 / 100);
+        SIZE sz;
+        of = SelectObject(dc, g_fontUi);
+        SetTextColor(dc, g_theme->text);
+        GetTextExtentPoint32W(dc, t->title, lstrlenW(t->title), &sz);
+        titleW = sz.cx;
+        if (titleW > maxTitle)
         {
-            cd->clrTextBk = g_theme->accentSoft;
-            cd->clrText = g_theme->text;
+            titleW = maxTitle;
+        }
+        RECT dr = nr;
+        dr.right = dr.left + titleW + S(2);
+        if (dr.right > nr.right)
+        {
+            dr.right = nr.right;
+        }
+        DrawTextW(dc, t->title, -1, &dr,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        SelectObject(dc, of);
+    }
+
+    if (t->note[0] != L'\0')
+    {
+        int nx = nr.left + (titleW > 0 ? titleW + S(10) : 0);
+        if (nx < nr.right - S(10))
+        {
+            RECT an = nr;
+            an.left = nx;
+            of = SelectObject(dc, g_fontStatus);
+            SetTextColor(dc, CAL_MUTED);
+            DrawTextW(dc, t->note, -1, &an,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+            SelectObject(dc, of);
+        }
+    }
+}
+
+/* 活动流整体绘制：双缓冲，按滚动量把内容坐标换算到窗口坐标 */
+static void AgendaPaint(HWND h, HDC hdcWin)
+{
+    RECT client;
+    GetClientRect(h, &client);
+    int W = client.right;
+    int H = client.bottom;
+    if (W <= 0 || H <= 0)
+    {
+        return;
+    }
+
+    HDC dc = CreateCompatibleDC(hdcWin);
+    HBITMAP bmp = CreateCompatibleBitmap(hdcWin, W, H);
+    HGDIOBJ oldBmp = SelectObject(dc, bmp);
+
+    HBRUSH bg = CreateSolidBrush(g_theme->card);
+    FillRect(dc, &client, bg);
+    DeleteObject(bg);
+    SetBkMode(dc, TRANSPARENT);
+
+    if (g_agCount < 1)
+    {
+        HGDIOBJ of = SelectObject(dc, g_fontBold);
+        SetTextColor(dc, g_theme->text);
+        RECT r = client;
+        r.top = H / 2 - S(34);
+        r.bottom = r.top + S(28);
+        DrawTextW(dc, Str(STR_AGENDA_EMPTY), -1, &r,
+            DT_CENTER | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(dc, of);
+
+        if (g_filterMode != 0)
+        {
+            of = SelectObject(dc, g_fontStatus);
+            SetTextColor(dc, CAL_MUTED);
+            r.top += S(28);
+            r.bottom = r.top + S(24);
+            DrawTextW(dc, Str(STR_AGENDA_EMPTY_DAY), -1, &r,
+                DT_CENTER | DT_TOP | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(dc, of);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < g_agCount; i++)
+        {
+            struct AgItem* it = &g_ag[i];
+            int top = it->rc.top - g_agScroll;
+            int bottom = it->rc.bottom - g_agScroll;
+            if (bottom <= 0 || top >= H)
+            {
+                continue;
+            }
+
+            RECT saved = it->rc;
+            it->rc.top = top;
+            it->rc.bottom = bottom;
+            if (it->kind == AG_GROUP)
+            {
+                DrawAgendaHeader(dc, it, W);
+            }
+            else
+            {
+                DrawAgendaRow(dc, it, i == g_agHover);
+            }
+            it->rc = saved;
+        }
+    }
+
+    BitBlt(hdcWin, 0, 0, W, H, dc, 0, 0, SRCCOPY);
+    SelectObject(dc, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(dc);
+}
+
+/* 键盘移动时把目标行滚进可视区域 */
+static void AgEnsureVisible(HWND h, int contentTop, int contentBottom)
+{
+    RECT rc;
+    GetClientRect(h, &rc);
+    int page = rc.bottom;
+    if (page <= 0)
+    {
+        return;
+    }
+    if (contentTop - g_agScroll < 0)
+    {
+        g_agScroll = contentTop - S(6);
+    }
+    else if (contentBottom - g_agScroll > page)
+    {
+        g_agScroll = contentBottom - page + S(6);
+    }
+    AgClampScroll(h);
+    AgUpdateScrollBar(h);
+}
+
+/* 选中某个条目下标（同时更新 Shift 锚点与悬停） */
+static void AgSelectIndex(HWND h, int idx)
+{
+    if (idx < 0 || idx >= g_agCount || g_ag[idx].kind != AG_ITEM)
+    {
+        return;
+    }
+    AgClearSelection();
+    AgAddSelected(g_tasks[g_ag[idx].taskIndex].id);
+    g_agAnchor = idx;
+    g_agHover = idx;
+    AgEnsureVisible(h, g_ag[idx].rc.top, g_ag[idx].rc.bottom);
+    UpdateDeleteButton();
+    InvalidateRect(h, NULL, FALSE);
+}
+
+/* 上下方向键：跨过分组标题，落到相邻日程行 */
+static void AgMoveSelection(HWND h, int dir)
+{
+    if (g_agCount < 1 || dir == 0)
+    {
+        return;
+    }
+
+    int cur = -1;
+    for (int i = 0; i < g_agCount; i++)
+    {
+        if (g_ag[i].kind == AG_ITEM && AgIsSelected(g_tasks[g_ag[i].taskIndex].id))
+        {
+            cur = i;
+            break;
+        }
+    }
+
+    int idx = cur;
+    if (cur < 0)
+    {
+        idx = (dir > 0) ? -1 : g_agCount;
+    }
+    for (;;)
+    {
+        idx += (dir > 0) ? 1 : -1;
+        if (idx < 0 || idx >= g_agCount)
+        {
+            return;
+        }
+        if (g_ag[idx].kind == AG_ITEM)
+        {
+            AgSelectIndex(h, idx);
+            return;
+        }
+    }
+}
+
+static LRESULT CALLBACK AgendaWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg)
+    {
+    case WM_ERASEBKGND:
+        return 1;
+
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(h, &ps);
+        AgendaPaint(h, dc);
+        EndPaint(h, &ps);
+        return 0;
+    }
+
+    case WM_SIZE:
+        AgendaRelayout(h);
+        return 0;
+
+    case WM_MOUSEWHEEL:
+    {
+        RECT rc;
+        GetClientRect(h, &rc);
+        int page = rc.bottom;
+        int old = g_agScroll;
+        g_agScroll -= (int)(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA) * S(56);
+        AgClampScroll(h);
+        AgUpdateScrollBar(h);
+        if (g_agScroll != old)
+        {
+            InvalidateRect(h, NULL, FALSE);
+            HideHoverTip();
+        }
+        return 0;
+    }
+
+    case WM_VSCROLL:
+    {
+        RECT rc;
+        GetClientRect(h, &rc);
+        int page = rc.bottom;
+        int old = g_agScroll;
+        int step = S(56);
+        switch (LOWORD(wp))
+        {
+        case SB_LINEUP:
+            g_agScroll -= step;
+            break;
+        case SB_LINEDOWN:
+            g_agScroll += step;
+            break;
+        case SB_PAGEUP:
+            g_agScroll -= (page - step);
+            break;
+        case SB_PAGEDOWN:
+            g_agScroll += (page - step);
+            break;
+        case SB_THUMBTRACK:
+        case SB_THUMBPOSITION:
+            g_agScroll = (int)HIWORD(wp);
+            break;
+        case SB_TOP:
+            g_agScroll = 0;
+            break;
+        case SB_BOTTOM:
+            g_agScroll = g_agContentH;
+            break;
+        default:
+            return 0;
+        }
+        AgClampScroll(h);
+        AgUpdateScrollBar(h);
+        if (g_agScroll != old)
+        {
+            InvalidateRect(h, NULL, FALSE);
+            HideHoverTip();
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE:
+    {
+        int x = GET_X_LPARAM(lp);
+        int y = GET_Y_LPARAM(lp);
+        int hit = AgendaHitTest(x, y, NULL);
+        if (hit != g_agHover)
+        {
+            g_agHover = hit;
+            InvalidateRect(h, NULL, FALSE);
+        }
+        if (!g_agTracking)
+        {
+            TRACKMOUSEEVENT tme;
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = h;
+            tme.dwHoverTime = 0;
+            TrackMouseEvent(&tme);
+            g_agTracking = TRUE;
+        }
+
+        if (hit >= 0 && g_ag[hit].kind == AG_ITEM)
+        {
+            struct Task* t = &g_tasks[g_ag[hit].taskIndex];
+            wchar_t tip[512];
+            RECT avoid;
+            RECT wr;
+            BuildBlockTip(t, tip, 512);
+            GetWindowRect(h, &wr);
+            avoid.left = wr.left + g_ag[hit].rc.left;
+            avoid.top = wr.top + g_ag[hit].rc.top - g_agScroll;
+            avoid.right = wr.left + g_ag[hit].rc.right;
+            avoid.bottom = wr.top + g_ag[hit].rc.bottom - g_agScroll;
+            ShowHoverTip(tip, &avoid, 1, g_catFill[t->category]);
         }
         else
         {
-            cd->clrTextBk = (item % 2 == 1) ? LIST_BG_ALT : g_theme->card;
+            HideHoverTip();
         }
-        return CDRF_NOTIFYPOSTPAINT | CDRF_NEWFONT;
+        return 0;
     }
 
-    case CDDS_ITEMPOSTPAINT:
+    case WM_MOUSELEAVE:
+        g_agTracking = FALSE;
+        if (g_agHover != -1)
+        {
+            g_agHover = -1;
+            InvalidateRect(h, NULL, FALSE);
+        }
+        HideHoverTip();
+        return 0;
+
+    case WM_LBUTTONDOWN:
     {
-        int item = (int)cd->nmcd.dwItemSpec;
-        LVITEMW lvi;
-        ZeroMemory(&lvi, sizeof(lvi));
-        lvi.mask = LVIF_PARAM;
-        lvi.iItem = item;
-        if (!ListView_GetItem(g_hList, &lvi))
+        SetFocus(h);
+        int x = GET_X_LPARAM(lp);
+        int y = GET_Y_LPARAM(lp);
+        int hit = AgendaHitTest(x, y, NULL);
+        if (hit < 0 || g_ag[hit].kind != AG_ITEM)
         {
-            return CDRF_DODEFAULT;
+            /* 点空白处或分组标题：与列表控件一致，取消选择 */
+            if (AgSelectionCount() > 0)
+            {
+                AgClearSelection();
+                InvalidateRect(h, NULL, FALSE);
+                UpdateDeleteButton();
+            }
+            return 0;
         }
-        int cat = TaskCategoryById((int)lvi.lParam);
-        if (cat < 1 || cat > CAT_COUNT) { cat = CAT_OTHER; }
+        struct Task* t = &g_tasks[g_ag[hit].taskIndex];
+        BOOL ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        BOOL shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
-        RECT rc;
-        if (ListView_GetSubItemRect(g_hList, item, 4, LVIR_BOUNDS, &rc))
+        if (ctrl)
         {
-            HDC hdc = cd->nmcd.hdc;
-            RECT block = rc;
-            InflateRect(&block, -S(5), -S(2));
-            FillRoundedRect(hdc, &block, g_catFill[cat]);
-            HGDIOBJ oldFont = SelectObject(hdc, g_fontBold);
-            int oldBk = SetBkMode(hdc, TRANSPARENT);
-            COLORREF oldColor = SetTextColor(hdc, RGB(255, 255, 255));
-            DrawTextW(hdc, CatStr(cat), -1, &block,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-            SetTextColor(hdc, oldColor);
-            SetBkMode(hdc, oldBk);
-            SelectObject(hdc, oldFont);
+            if (AgIsSelected(t->id))
+            {
+                AgRemoveSelected(t->id);
+            }
+            else
+            {
+                AgAddSelected(t->id);
+            }
+            g_agAnchor = hit;
         }
-        return CDRF_DODEFAULT;
+        else if (shift && g_agAnchor >= 0)
+        {
+            AgClearSelection();
+            int lo = (hit < g_agAnchor) ? hit : g_agAnchor;
+            int hi = (hit < g_agAnchor) ? g_agAnchor : hit;
+            for (int i = lo; i <= hi; i++)
+            {
+                if (g_ag[i].kind == AG_ITEM)
+                {
+                    AgAddSelected(g_tasks[g_ag[i].taskIndex].id);
+                }
+            }
+        }
+        else
+        {
+            AgClearSelection();
+            AgAddSelected(t->id);
+            g_agAnchor = hit;
+        }
+        InvalidateRect(h, NULL, FALSE);
+        UpdateDeleteButton();
+        return 0;
     }
-    }
-    return CDRF_DODEFAULT;
-}
 
-static LRESULT Main_OnNotify(HWND hWnd, LPARAM lParam)
-{
-    LPNMHDR pnm = (LPNMHDR)lParam;
-    if (pnm->idFrom == IDC_LIST)
-    {
-        if (pnm->code == NM_CUSTOMDRAW)
+    case WM_KEYDOWN:
+        if (wp == VK_ESCAPE)
         {
-            return Main_OnCustomDraw((LPNMLVCUSTOMDRAW)lParam);
-        }
-        if (pnm->code == LVN_ITEMCHANGED)
-        {
+            AgClearSelection();
+            InvalidateRect(h, NULL, FALSE);
             UpdateDeleteButton();
+            return 0;
         }
-        if (pnm->code == LVN_KEYDOWN)
+        if (wp == VK_DELETE)
         {
-            LPNMLVKEYDOWN pkd = (LPNMLVKEYDOWN)lParam;
-            if (pkd->wVKey == 'A' && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                /* Ctrl+A：全选当前列表（只作用于筛选后可见的行） */
-                ListView_SetItemState(g_hList, -1, LVIS_SELECTED, LVIS_SELECTED);
-                UpdateDeleteButton();
-            }
-            else if (pkd->wVKey == VK_ESCAPE)
-            {
-                ListView_SetItemState(g_hList, -1, 0, LVIS_SELECTED);
-                UpdateDeleteButton();
-            }
-            else if (pkd->wVKey == VK_DELETE)
-            {
-                DeleteSelected();
-            }
+            DeleteSelected();
+            return 0;
         }
+        if (wp == 'A' && (GetKeyState(VK_CONTROL) & 0x8000))
+        {
+            AgSelectAll();
+            for (int i = 0; i < g_agCount; i++)
+            {
+                if (g_ag[i].kind == AG_ITEM)
+                {
+                    g_agAnchor = i;
+                    break;
+                }
+            }
+            InvalidateRect(h, NULL, FALSE);
+            UpdateDeleteButton();
+            return 0;
+        }
+        if (wp == VK_UP)
+        {
+            AgMoveSelection(h, -1);
+            return 0;
+        }
+        if (wp == VK_DOWN)
+        {
+            AgMoveSelection(h, 1);
+            return 0;
+        }
+        if (wp == VK_HOME)
+        {
+            for (int i = 0; i < g_agCount; i++)
+            {
+                if (g_ag[i].kind == AG_ITEM)
+                {
+                    AgSelectIndex(h, i);
+                    return 0;
+                }
+            }
+            return 0;
+        }
+        if (wp == VK_END)
+        {
+            for (int i = g_agCount - 1; i >= 0; i--)
+            {
+                if (g_ag[i].kind == AG_ITEM)
+                {
+                    AgSelectIndex(h, i);
+                    return 0;
+                }
+            }
+            return 0;
+        }
+        return 0;
+
+    case WM_GETDLGCODE:
+        return DLGC_WANTARROWS | DLGC_WANTCHARS;
+
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+        InvalidateRect(h, NULL, FALSE);
+        return 0;
     }
-    return 0;
+    return DefWindowProcW(h, msg, wp, lp);
 }
 
 /* 月视图 / 周视图分段按钮：跟随主题自绘 */
@@ -5506,9 +6165,6 @@ LRESULT CALLBACK MainWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
             break;
         }
         return 0;
-
-    case WM_NOTIFY:
-        return Main_OnNotify(hWnd, lParam);
 
     case WM_TIMER:
         if (wParam == TIMER_CHECK)
@@ -5721,6 +6377,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wcWeek.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wcWeek.lpszClassName = L"TimeManagerWeek";
     RegisterClassExW(&wcWeek);
+
+    WNDCLASSEXW wcAgenda;
+    ZeroMemory(&wcAgenda, sizeof(wcAgenda));
+    wcAgenda.cbSize = sizeof(wcAgenda);
+    wcAgenda.style = CS_HREDRAW | CS_VREDRAW;
+    wcAgenda.lpfnWndProc = AgendaWndProc;
+    wcAgenda.hInstance = hInstance;
+    wcAgenda.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    wcAgenda.hbrBackground = NULL;
+    wcAgenda.lpszClassName = L"TimeManagerAgenda";
+    RegisterClassExW(&wcAgenda);
 
     WNDCLASSEXW wcTip;
     ZeroMemory(&wcTip, sizeof(wcTip));
