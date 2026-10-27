@@ -466,12 +466,14 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(CONFIRM_DELETE_MULTI, L"确定删除选中的 %d 个日程吗？此操作不可恢复。", L"選択した %d 件の予定を削除しますか？この操作は元に戻せません。", L"Delete the %d selected events? This cannot be undone.") \
     X(CONFIRM_DEL_TITLE, L"确认删除", L"削除の確認", L"Confirm deletion") \
     X(ADD_TITLE,       L"添加日程", L"予定を追加", L"Add event") \
+    X(ADD_SEC_BASE,    L"基本信息", L"基本情報", L"Event details") \
+    X(ADD_SEC_RULES,   L"提醒规则", L"通知ルール", L"Reminders") \
     X(LBL_START,       L"开始：", L"開始：", L"Start:") \
     X(LBL_END,         L"结束：", L"終了：", L"End:") \
     X(LBL_TITLE,       L"标题：", L"タイトル：", L"Title:") \
     X(LBL_NOTE,        L"备注：", L"メモ：", L"Note:") \
     X(LBL_RULES,       L"提醒规则：", L"通知ルール：", L"Reminders:") \
-    X(LBL_REPEAT,      L"重复：", L"繰り返し：", L"Repeat:") \
+    X(LBL_REPEAT,      L"重复：", L"繰返し：", L"Repeat:") \
     X(REPEAT_ONCE,     L"单次日程", L"単発の予定", L"Single event") \
     X(REPEAT_WEEKS,    L"每周重复，连续 %d 周", L"毎週繰り返し（%d 週間）", L"Weekly for %d weeks") \
     X(ERR_TASK_REPEAT, L"连续日程将超出数量上限，请减少周数。", L"繰り返し予定が上限を超えます。週数を減らしてください。", L"The weekly events would exceed the event limit. Reduce the number of weeks.") \
@@ -2422,40 +2424,104 @@ static void ShowNotice(HWND hWnd, int strId)
         MB_OK | MB_ICONWARNING | MB_TOPMOST);
 }
 
+/* 卡片式布局参数：与“设置”窗口共用同一套间距和配色 */
+#define ADDDLG_CW        S(520)
+#define ADDDLG_CH        S(612)
+#define ADDDLG_M         S(16)
+#define ADDDLG_CARD_W    (ADDDLG_CW - 2 * ADDDLG_M)
+#define ADDDLG_CARD_H    S(530)
+#define ADDDLG_PX        S(24)
+#define ADDDLG_LABEL_X   (ADDDLG_M + ADDDLG_PX)
+#define ADDDLG_CTRL_X    (ADDDLG_LABEL_X + S(88))
+#define ADDDLG_RIGHT     (ADDDLG_M + ADDDLG_CARD_W - ADDDLG_PX)
+#define ADDDLG_BTN_W     S(96)
+#define ADDDLG_BTN_H     S(34)
+
+static void SetDlgFillCard(HDC hdc, const RECT* rc);
+static void SetDlgHairline(HDC hdc, int x1, int x2, int y);
+static void SetDlgDrawOk(LPDRAWITEMSTRUCT dis);
+
+/* 对话框背景：白色圆角卡片 + 两个分区标题 + 一条分隔线 */
+static void AddDlgPaint(HWND hWnd)
+{
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hWnd, &ps);
+
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    FillRect(hdc, &rc, g_hDlgBrush);
+
+    RECT card;
+    SetRect(&card, ADDDLG_M, ADDDLG_M,
+        ADDDLG_M + ADDDLG_CARD_W, ADDDLG_M + ADDDLG_CARD_H);
+    SetDlgFillCard(hdc, &card);
+
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontBold);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, g_theme->accent);
+
+    RECT t;
+    SetRect(&t, ADDDLG_LABEL_X, ADDDLG_M + S(8),
+        ADDDLG_RIGHT, ADDDLG_M + S(32));
+    DrawTextW(hdc, Str(STR_ADD_SEC_BASE), -1, &t,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SetRect(&t, ADDDLG_LABEL_X, ADDDLG_M + S(290),
+        ADDDLG_RIGHT, ADDDLG_M + S(314));
+    DrawTextW(hdc, Str(STR_ADD_SEC_RULES), -1, &t,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SelectObject(hdc, oldFont);
+
+    SetDlgHairline(hdc, ADDDLG_LABEL_X, ADDDLG_RIGHT, ADDDLG_M + S(282));
+
+    EndPaint(hWnd, &ps);
+}
+
 static BOOL AddDlg_OnCreate(HWND hWnd)
 {
-    CreateLabel(hWnd, Str(STR_LBL_START), S(16), S(20), S(80), S(28));
+    /* —— 日程信息 —— */
+    CreateLabel(hWnd, Str(STR_LBL_START), ADDDLG_LABEL_X,
+        ADDDLG_M + S(38), S(88), S(28));
     g_dlgSDate = CreateWindowExW(0, DATETIMEPICK_CLASSW, L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | DTS_SHORTDATEFORMAT,
-        S(104), S(16), S(170), S(30), hWnd, (HMENU)(LONG_PTR)IDC_SDATE, g_hInst, NULL);
+        ADDDLG_CTRL_X, ADDDLG_M + S(36), S(200), S(30),
+        hWnd, (HMENU)(LONG_PTR)IDC_SDATE, g_hInst, NULL);
     DateTime_SetFormat(g_dlgSDate, L"yyyy/MM/dd");
 
     g_dlgSTime = CreateWindowExW(0, DATETIMEPICK_CLASSW, L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | DTS_TIMEFORMAT,
-        S(286), S(16), S(110), S(30), hWnd, (HMENU)(LONG_PTR)IDC_STIME, g_hInst, NULL);
+        ADDDLG_CTRL_X + S(208), ADDDLG_M + S(36), S(136), S(30),
+        hWnd, (HMENU)(LONG_PTR)IDC_STIME, g_hInst, NULL);
     DateTime_SetFormat(g_dlgSTime, L"HH:mm");
 
-    CreateLabel(hWnd, Str(STR_LBL_END), S(16), S(60), S(80), S(28));
+    CreateLabel(hWnd, Str(STR_LBL_END), ADDDLG_LABEL_X,
+        ADDDLG_M + S(78), S(88), S(28));
     g_dlgEDate = CreateWindowExW(0, DATETIMEPICK_CLASSW, L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | DTS_SHORTDATEFORMAT,
-        S(104), S(56), S(170), S(30), hWnd, (HMENU)(LONG_PTR)IDC_EDATE, g_hInst, NULL);
+        ADDDLG_CTRL_X, ADDDLG_M + S(76), S(200), S(30),
+        hWnd, (HMENU)(LONG_PTR)IDC_EDATE, g_hInst, NULL);
     DateTime_SetFormat(g_dlgEDate, L"yyyy/MM/dd");
 
     g_dlgETime = CreateWindowExW(0, DATETIMEPICK_CLASSW, L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | DTS_TIMEFORMAT,
-        S(286), S(56), S(110), S(30), hWnd, (HMENU)(LONG_PTR)IDC_ETIME, g_hInst, NULL);
+        ADDDLG_CTRL_X + S(208), ADDDLG_M + S(76), S(136), S(30),
+        hWnd, (HMENU)(LONG_PTR)IDC_ETIME, g_hInst, NULL);
     DateTime_SetFormat(g_dlgETime, L"HH:mm");
 
-    CreateLabel(hWnd, Str(STR_LBL_TITLE), S(16), S(100), S(80), S(28));
+    CreateLabel(hWnd, Str(STR_LBL_TITLE), ADDDLG_LABEL_X,
+        ADDDLG_M + S(118), S(88), S(28));
     g_dlgTitle = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        S(104), S(96), S(184), S(30), hWnd, (HMENU)(LONG_PTR)IDC_TITLE, g_hInst, NULL);
+        ADDDLG_CTRL_X, ADDDLG_M + S(116), S(344), S(30),
+        hWnd, (HMENU)(LONG_PTR)IDC_TITLE, g_hInst, NULL);
     SendMessageW(g_dlgTitle, EM_SETLIMITTEXT, (WPARAM)(MAX_TITLE - 1), 0);
 
-    CreateLabel(hWnd, Str(STR_LBL_CAT), S(298), S(100), S(56), S(28));
+    CreateLabel(hWnd, Str(STR_LBL_CAT), ADDDLG_LABEL_X,
+        ADDDLG_M + S(158), S(88), S(28));
     g_dlgCat = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(356), S(96), S(148), S(260),
+        ADDDLG_CTRL_X, ADDDLG_M + S(156), S(140), S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_CAT, g_hInst, NULL);
     for (int c = 1; c <= CAT_COUNT; c++)
     {
@@ -2464,10 +2530,11 @@ static BOOL AddDlg_OnCreate(HWND hWnd)
     }
     SendMessageW(g_dlgCat, CB_SETCURSEL, g_dlgCategory - 1, 0);
 
-    CreateLabel(hWnd, Str(STR_LBL_REPEAT), S(16), S(140), S(80), S(28));
+    CreateLabel(hWnd, Str(STR_LBL_REPEAT), ADDDLG_CTRL_X + S(154),
+        ADDDLG_M + S(158), S(66), S(28));
     HWND hRepeat = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(104), S(136), S(260), S(260),
+        ADDDLG_CTRL_X + S(222), ADDDLG_M + S(156), S(122), S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_REPEAT, g_hInst, NULL);
     SendMessageW(hRepeat, CB_ADDSTRING, 0, (LPARAM)Str(STR_REPEAT_ONCE));
     for (int w = 2; w <= REPEAT_MAX_WEEKS; w++)
@@ -2479,28 +2546,31 @@ static BOOL AddDlg_OnCreate(HWND hWnd)
     }
     SendMessageW(hRepeat, CB_SETCURSEL, 0, 0);
 
-    CreateLabel(hWnd, Str(STR_LBL_NOTE), S(16), S(186), S(80), S(24));
+    CreateLabel(hWnd, Str(STR_LBL_NOTE), ADDDLG_LABEL_X,
+        ADDDLG_M + S(198), S(88), S(24));
     g_dlgNote = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE |
         ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL,
-        S(104), S(180), S(400), S(72), hWnd, (HMENU)(LONG_PTR)IDC_NOTE, g_hInst, NULL);
+        ADDDLG_CTRL_X, ADDDLG_M + S(196), S(344), S(74),
+        hWnd, (HMENU)(LONG_PTR)IDC_NOTE, g_hInst, NULL);
     SendMessageW(g_dlgNote, EM_SETLIMITTEXT, (WPARAM)(MAX_NOTE - 1), 0);
 
-    CreateLabel(hWnd, Str(STR_LBL_RULES), S(16), S(266), S(400), S(24));
+    /* —— 提醒规则 —— */
     g_dlgRList = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | LBS_NOTIFY | WS_VSCROLL |
         LBS_HASSTRINGS,
-        S(16), S(290), S(488), S(100),
+        ADDDLG_LABEL_X, ADDDLG_M + S(322), S(432), S(100),
         hWnd, (HMENU)(LONG_PTR)IDC_RLIST, g_hInst, NULL);
 
     g_dlgRValue = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_NUMBER,
-        S(104), S(400), S(64), S(30), hWnd, (HMENU)(LONG_PTR)IDC_RVALUE, g_hInst, NULL);
+        ADDDLG_CTRL_X, ADDDLG_M + S(430), S(64), S(30),
+        hWnd, (HMENU)(LONG_PTR)IDC_RVALUE, g_hInst, NULL);
     SetWindowTextW(g_dlgRValue, L"15");
 
     g_dlgRUnit = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(176), S(400), S(110), S(240),
+        ADDDLG_CTRL_X + S(72), ADDDLG_M + S(430), S(110), S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_RUNIT, g_hInst, NULL);
     SendMessageW(g_dlgRUnit, CB_ADDSTRING, 0, (LPARAM)Str(STR_UNIT_MIN));
     SendMessageW(g_dlgRUnit, CB_ADDSTRING, 0, (LPARAM)Str(STR_UNIT_HOUR));
@@ -2509,19 +2579,25 @@ static BOOL AddDlg_OnCreate(HWND hWnd)
 
     CreateWindowExW(0, L"BUTTON", Str(STR_RULE_ADD),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(296), S(398), S(100), S(32), hWnd, (HMENU)(LONG_PTR)IDC_RADD, g_hInst, NULL);
+        ADDDLG_CTRL_X + S(190), ADDDLG_M + S(428), S(74), S(32),
+        hWnd, (HMENU)(LONG_PTR)IDC_RADD, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_RULE_DEL),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(404), S(398), S(100), S(32), hWnd, (HMENU)(LONG_PTR)IDC_RDEL, g_hInst, NULL);
+        ADDDLG_CTRL_X + S(272), ADDDLG_M + S(428), S(72), S(32),
+        hWnd, (HMENU)(LONG_PTR)IDC_RDEL, g_hInst, NULL);
 
-    CreateHint(hWnd, Str(STR_ADD_HINT), S(104), S(442), S(400), S(42), IDC_ADD_HINT);
+    CreateHint(hWnd, Str(STR_ADD_HINT), ADDDLG_CTRL_X,
+        ADDDLG_M + S(470), S(344), S(40), IDC_ADD_HINT);
 
-    CreateWindowExW(0, L"BUTTON", Str(STR_OK),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-        S(300), S(498), S(100), S(34), hWnd, (HMENU)(LONG_PTR)IDC_OK, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_CANCEL),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(408), S(498), S(100), S(34), hWnd, (HMENU)(LONG_PTR)IDC_CANCEL, g_hInst, NULL);
+        ADDDLG_RIGHT - S(200), ADDDLG_M + ADDDLG_CARD_H + S(16), S(92), ADDDLG_BTN_H,
+        hWnd, (HMENU)(LONG_PTR)IDC_CANCEL, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", Str(STR_OK),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        ADDDLG_RIGHT - ADDDLG_BTN_W, ADDDLG_M + ADDDLG_CARD_H + S(16),
+        ADDDLG_BTN_W, ADDDLG_BTN_H,
+        hWnd, (HMENU)(LONG_PTR)IDC_OK, g_hInst, NULL);
 
     /* 默认开始 = 当前时间，结束 = 1 小时后 */
     SYSTEMTIME now, endTime;
@@ -2748,6 +2824,29 @@ LRESULT CALLBACK AddDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         return 1;
     }
 
+    case WM_PAINT:
+        AddDlgPaint(hWnd);
+        return 0;
+
+    case WM_DRAWITEM:
+    {
+        LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)lParam;
+        if (dis->CtlID == IDC_OK)
+        {
+            SetDlgDrawOk(dis);
+            return TRUE;
+        }
+        break;
+    }
+
+    case WM_KEYDOWN:
+        if (wParam == VK_RETURN)
+        {
+            OnAddOk(hWnd);
+            return 0;
+        }
+        break;
+
     case WM_CTLCOLORSTATIC:
     {
         int id = GetDlgCtrlID((HWND)lParam);
@@ -2760,7 +2859,7 @@ LRESULT CALLBACK AddDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         {
             SetTextColor((HDC)wParam, g_theme->text);
         }
-        return (LRESULT)g_hDlgBrush;
+        return (LRESULT)g_hCardBrush;
     }
 
     case WM_COMMAND:
@@ -2797,7 +2896,7 @@ void ShowAddDialog(void)
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     DWORD exStyle = WS_EX_DLGMODALFRAME;
     RECT wr;
-    SetRect(&wr, 0, 0, S(520), S(546));
+    SetRect(&wr, 0, 0, ADDDLG_CW, ADDDLG_CH);
     AdjustWindowRectEx(&wr, style, FALSE, exStyle);
 
     g_hAdd = CreateWindowExW(
