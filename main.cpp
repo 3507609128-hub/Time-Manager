@@ -1,4 +1,4 @@
-/*
+﻿/*
 ============================================================================
   时间管理器（Time-Manager）v2
 ----------------------------------------------------------------------------
@@ -324,6 +324,7 @@ static const wchar_t* g_fontFamily = L"Microsoft YaHei UI";
 static int    g_dpi = 96;
 static HBRUSH g_hBgBrush = NULL;    /* 主窗口页面底色 */
 static HBRUSH g_hDlgBrush = NULL;   /* 对话框底色 */
+static HBRUSH g_hCardBrush = NULL;  /* 对话框卡片底色 */
 static const struct Theme* g_theme = NULL;
 
 static HWND   g_hMain = NULL;
@@ -491,6 +492,8 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(ERR_TIME_ORDER,  L"结束时间不能早于开始时间。", L"終了時刻は開始時刻より後にしてください。", L"The end time cannot be earlier than the start time.") \
     X(ERR_TITLE_EMPTY, L"请填写任务标题。", L"タイトルを入力してください。", L"Please enter a title.") \
     X(SET_TITLE,       L"设置", L"設定", L"Settings") \
+    X(SET_SEC_APPEAR,  L"外观与启动", L"外観と起動", L"Appearance & Startup") \
+    X(SET_SEC_ALERT,   L"提醒方式", L"通知", L"Notifications") \
     X(SET_LANG,        L"语言：", L"言語：", L"Language:") \
     X(SET_THEME,       L"界面风格：", L"テーマ：", L"Theme:") \
     X(THEME_CLASSIC,   L"经典白", L"クラシック", L"Classic") \
@@ -502,7 +505,7 @@ enum { LANG_ZH = 0, LANG_JA = 1, LANG_EN = 2, LANG_COUNT = 3 };
     X(LANG_EN,         L"English", L"English", L"English") \
     X(SET_AUTOSTART,   L"开机时自动启动（最小化到托盘）", L"ログイン時に自動起動（トレイに最小化）", L"Start automatically at login (minimized to tray)") \
     X(SET_MINSTART,    L"手动启动时也最小化到托盘", L"手動起動時もトレイに最小化", L"Also minimize to tray on manual start") \
-    X(SET_DURATION,    L"通知停留：", L"通知の表示時間：", L"Show notification for:") \
+    X(SET_DURATION,    L"通知停留：", L"通知の表示：", L"Show for:") \
     X(SET_SECONDS,     L"%d 秒", L"%d 秒", L"%d sec") \
     X(SET_SOUND,       L"提示音：", L"通知音：", L"Sound:") \
     X(SND_MUTE,        L"静音（不播放）", L"消音（再生しない）", L"Mute") \
@@ -2855,14 +2858,124 @@ void ShowAddDialog(void)
 
 /*============================= “设置”窗口 =============================*/
 
+/* 卡片式布局参数：创建控件与自绘卡片共用同一套坐标 */
+#define SETDLG_CW        S(560)
+#define SETDLG_CH        S(560)
+#define SETDLG_M         S(20)
+#define SETDLG_CARD_W    S(520)
+#define SETDLG_CARD_H    S(420)
+#define SETDLG_PX        S(24)
+#define SETDLG_LABEL_X   (SETDLG_M + SETDLG_PX)
+#define SETDLG_CTRL_X    (SETDLG_LABEL_X + S(112))
+#define SETDLG_CTRL_W    S(260)
+#define SETDLG_BTN_W     S(96)
+#define SETDLG_BTN_H     S(34)
+
+/* 白色圆角卡片 + 1px 边框，与主界面日历卡片同一视觉语言 */
+static void SetDlgFillCard(HDC hdc, const RECT* rc)
+{
+    HBRUSH br = CreateSolidBrush(g_theme->card);
+    HPEN pen = CreatePen(PS_SOLID, 1, g_theme->border);
+    HGDIOBJ oldBrush = SelectObject(hdc, br);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    RoundRect(hdc, rc->left, rc->top, rc->right, rc->bottom, S(14), S(14));
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(br);
+    DeleteObject(pen);
+}
+
+static void SetDlgHairline(HDC hdc, int x1, int x2, int y)
+{
+    RECT rc;
+    SetRect(&rc, x1, y, x2, y + 1);
+    HBRUSH br = CreateSolidBrush(g_theme->border);
+    FillRect(hdc, &rc, br);
+    DeleteObject(br);
+}
+
+/* 对话框背景：卡片 + 分区标题 + 两条分隔线 */
+static void SetDlgPaint(HWND hWnd)
+{
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hWnd, &ps);
+
+    RECT rc;
+    GetClientRect(hWnd, &rc);
+    FillRect(hdc, &rc, g_hDlgBrush);
+
+    RECT card;
+    SetRect(&card, SETDLG_M, SETDLG_M,
+        SETDLG_M + SETDLG_CARD_W, SETDLG_M + SETDLG_CARD_H);
+    SetDlgFillCard(hdc, &card);
+
+    HGDIOBJ oldFont = SelectObject(hdc, g_fontBold);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, g_theme->accent);
+
+    RECT t;
+    SetRect(&t, SETDLG_LABEL_X, SETDLG_M + S(12),
+        SETDLG_M + SETDLG_CARD_W - SETDLG_PX, SETDLG_M + S(38));
+    DrawTextW(hdc, Str(STR_SET_SEC_APPEAR), -1, &t,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SetRect(&t, SETDLG_LABEL_X, SETDLG_M + S(204),
+        SETDLG_M + SETDLG_CARD_W - SETDLG_PX, SETDLG_M + S(230));
+    DrawTextW(hdc, Str(STR_SET_SEC_ALERT), -1, &t,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    SelectObject(hdc, oldFont);
+
+    /* 分组分隔线 + 页脚分隔线 */
+    SetDlgHairline(hdc, SETDLG_LABEL_X, SETDLG_M + SETDLG_CARD_W - SETDLG_PX,
+        SETDLG_M + S(192));
+    SetDlgHairline(hdc, SETDLG_M, SETDLG_M + SETDLG_CARD_W,
+        SETDLG_M + SETDLG_CARD_H + S(52));
+
+    EndPaint(hWnd, &ps);
+}
+
+/* 主按钮：强调色填充 + 白字；其余按钮保持系统原生风格 */
+static void SetDlgDrawOk(LPDRAWITEMSTRUCT dis)
+{
+    COLORREF fill = (dis->itemState & ODS_SELECTED)
+        ? g_theme->accentDark : g_theme->accent;
+    HBRUSH br = CreateSolidBrush(fill);
+    HPEN pen = CreatePen(PS_SOLID, 1, fill);
+    HGDIOBJ oldBrush = SelectObject(dis->hDC, br);
+    HGDIOBJ oldPen = SelectObject(dis->hDC, pen);
+    RECT rc = dis->rcItem;
+    RoundRect(dis->hDC, rc.left, rc.top, rc.right, rc.bottom, S(10), S(10));
+    SelectObject(dis->hDC, oldBrush);
+    SelectObject(dis->hDC, oldPen);
+    DeleteObject(br);
+    DeleteObject(pen);
+
+    wchar_t text[64];
+    GetWindowTextW(dis->hwndItem, text, 64);
+    SetBkMode(dis->hDC, TRANSPARENT);
+    SetTextColor(dis->hDC, RGB(255, 255, 255));
+    HGDIOBJ oldFont = SelectObject(dis->hDC, g_fontUi);
+    DrawTextW(dis->hDC, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    if (dis->itemState & ODS_FOCUS)
+    {
+        RECT f = rc;
+        InflateRect(&f, -S(4), -S(4));
+        DrawFocusRect(dis->hDC, &f);
+    }
+    SelectObject(dis->hDC, oldFont);
+}
+
 static BOOL SetDlg_OnCreate(HWND hWnd)
 {
     g_dlgSet = g_set;
 
-    CreateLabel(hWnd, Str(STR_SET_LANG), S(16), S(18), S(100), S(28));
+    /* —— 外观与启动 —— */
+    CreateLabel(hWnd, Str(STR_SET_LANG), SETDLG_LABEL_X, SETDLG_M + S(52),
+        S(112), S(28));
     HWND hLang = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(120), S(14), S(200), S(260),
+        SETDLG_CTRL_X, SETDLG_M + S(49), SETDLG_CTRL_W, S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_LANG, g_hInst, NULL);
     SendMessageW(hLang, CB_ADDSTRING, 0, (LPARAM)Str(STR_LANG_ZH));
     SendMessageW(hLang, CB_ADDSTRING, 0, (LPARAM)Str(STR_LANG_JA));
@@ -2873,42 +2986,45 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
     }
     SendMessageW(hLang, CB_SETCURSEL, g_dlgSet.lang, 0);
 
-    /* 界面风格 */
-    CreateLabel(hWnd, Str(STR_SET_THEME), S(16), S(56), S(100), S(28));
-    HWND hTheme = CreateWindowExW(0, L"COMBOBOX", L"",
+    CreateLabel(hWnd, Str(STR_SET_THEME), SETDLG_LABEL_X, SETDLG_M + S(92),
+        S(112), S(28));
+    HWND hThemeBox = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(120), S(52), S(260), S(260),
+        SETDLG_CTRL_X, SETDLG_M + S(89), SETDLG_CTRL_W, S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_THEME, g_hInst, NULL);
     for (int i = 0; i < THEME_COUNT; i++)
     {
-        SendMessageW(hTheme, CB_ADDSTRING, 0, (LPARAM)ThemeStr(i));
+        SendMessageW(hThemeBox, CB_ADDSTRING, 0, (LPARAM)ThemeStr(i));
     }
     if (g_dlgSet.theme < 0 || g_dlgSet.theme >= THEME_COUNT)
     {
         g_dlgSet.theme = THEME_DEFAULT;
     }
-    SendMessageW(hTheme, CB_SETCURSEL, g_dlgSet.theme, 0);
+    SendMessageW(hThemeBox, CB_SETCURSEL, g_dlgSet.theme, 0);
 
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_AUTOSTART),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        S(16), S(88), S(480), S(28),
+        SETDLG_LABEL_X, SETDLG_M + S(122), S(436), S(26),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_AUTO, g_hInst, NULL);
     Button_SetCheck(GetDlgItem(hWnd, IDC_SET_AUTO),
         g_dlgSet.autostart ? BST_CHECKED : BST_UNCHECKED);
 
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_MINSTART),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        S(16), S(120), S(480), S(28),
+        SETDLG_LABEL_X, SETDLG_M + S(150), S(436), S(26),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_MIN, g_hInst, NULL);
     Button_SetCheck(GetDlgItem(hWnd, IDC_SET_MIN),
         g_dlgSet.minStart ? BST_CHECKED : BST_UNCHECKED);
 
-    CreateLabel(hWnd, Str(STR_SET_DURATION), S(16), S(158), S(130), S(28));
+    /* —— 提醒方式 —— */
+    const int durList[6] = { 8, 10, 12, 15, 20, 30 };
+
+    CreateLabel(hWnd, Str(STR_SET_DURATION), SETDLG_LABEL_X, SETDLG_M + S(256),
+        S(112), S(28));
     HWND hDur = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(150), S(154), S(110), S(260),
+        SETDLG_CTRL_X, SETDLG_M + S(253), SETDLG_CTRL_W, S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_DUR, g_hInst, NULL);
-    const int durList[6] = { 8, 10, 12, 15, 20, 30 };
     for (int i = 0; i < 6; i++)
     {
         wchar_t t[32];
@@ -2924,10 +3040,11 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
         SendMessageW(hDur, CB_SETCURSEL, 2, 0);
     }
 
-    CreateLabel(hWnd, Str(STR_SET_SOUND), S(16), S(194), S(130), S(28));
+    CreateLabel(hWnd, Str(STR_SET_SOUND), SETDLG_LABEL_X, SETDLG_M + S(296),
+        S(112), S(28));
     HWND hSound = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-        S(150), S(190), S(200), S(260),
+        SETDLG_CTRL_X, SETDLG_M + S(293), SETDLG_CTRL_W, S(240),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_SOUND, g_hInst, NULL);
     for (int i = 0; i <= SOUND_WAV; i++)
     {
@@ -2941,39 +3058,39 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
 
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_TEST),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(362), S(188), S(90), S(32),
+        SETDLG_CTRL_X + SETDLG_CTRL_W + S(10), SETDLG_M + S(292), S(76), S(34),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_TEST, g_hInst, NULL);
 
-    CreateLabel(hWnd, Str(STR_SET_WAV), S(16), S(230), S(130), S(28));
+    CreateLabel(hWnd, Str(STR_SET_WAV), SETDLG_LABEL_X, SETDLG_M + S(336),
+        S(112), S(28));
     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", g_dlgSet.wavPath,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        S(16), S(258), S(400), S(30),
+        SETDLG_CTRL_X, SETDLG_M + S(333), SETDLG_CTRL_W, S(32),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_WAV, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_SET_BROWSE),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(424), S(256), S(80), S(32),
+        SETDLG_CTRL_X + SETDLG_CTRL_W + S(10), SETDLG_M + S(332), S(76), S(34),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_BROWSE, g_hInst, NULL);
 
-    CreateHint(hWnd, Str(STR_SET_HINT), S(16), S(298), S(488), S(46), IDC_SET_HINT);
+    CreateHint(hWnd, Str(STR_SET_HINT), SETDLG_LABEL_X, SETDLG_M + S(374),
+        S(448), S(44), IDC_SET_HINT);
 
+    /* —— 底部按钮：确定（强调色）/ 取消 —— */
     CreateWindowExW(0, L"BUTTON", Str(STR_OK),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-        S(300), S(360), S(100), S(34),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+        SETDLG_M + SETDLG_CARD_W - SETDLG_BTN_W,
+        SETDLG_M + SETDLG_CARD_H + S(16), SETDLG_BTN_W, SETDLG_BTN_H,
         hWnd, (HMENU)(LONG_PTR)IDC_SET_OK, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", Str(STR_CANCEL),
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-        S(408), S(360), S(100), S(34),
+        SETDLG_M + SETDLG_CARD_W - SETDLG_BTN_W * 2 - S(12),
+        SETDLG_M + SETDLG_CARD_H + S(16), SETDLG_BTN_W, SETDLG_BTN_H,
         hWnd, (HMENU)(LONG_PTR)IDC_SET_CANCEL, g_hInst, NULL);
 
-    /* 分隔线 + 制作人员 / 联系邮箱 */
-    CreateWindowExW(0, L"STATIC", L"",
-        WS_CHILD | WS_VISIBLE | SS_ETCHEDHORZ,
-        S(16), S(410), S(488), 1,
-        hWnd, (HMENU)(LONG_PTR)IDC_SEPARATOR, g_hInst, NULL);
-
+    /* —— 页脚：制作人员 / 联系邮箱 —— */
     CreateWindowExW(0, L"STATIC", Str(STR_CREDITS_AUTHOR),
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
-        S(16), S(418), S(488), S(22),
+        SETDLG_M, SETDLG_M + SETDLG_CARD_H + S(60), SETDLG_CARD_W, S(22),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_CREDITS, g_hInst, NULL);
 
     wchar_t emailText[256];
@@ -2981,7 +3098,7 @@ static BOOL SetDlg_OnCreate(HWND hWnd)
         L"3507609128@qq.com", L"3507609128@qq.com");
     CreateWindowExW(0, WC_LINK, emailText,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        S(16), S(442), S(488), S(24),
+        SETDLG_M, SETDLG_M + SETDLG_CARD_H + S(82), SETDLG_CARD_W, S(22),
         hWnd, (HMENU)(LONG_PTR)IDC_SET_EMAIL, g_hInst, NULL);
 
     EnumChildWindows(hWnd, SetFontToChild, (LPARAM)g_fontUi);
@@ -3117,12 +3234,38 @@ LRESULT CALLBACK SetDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         SetDlg_OnCreate(hWnd);
         return 0;
 
+    case WM_PAINT:
+        SetDlgPaint(hWnd);
+        return 0;
+
     case WM_ERASEBKGND:
     {
         RECT rc;
         GetClientRect(hWnd, &rc);
         FillRect((HDC)wParam, &rc, g_hDlgBrush);
         return 1;
+    }
+
+    case WM_DRAWITEM:
+    {
+        LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)lParam;
+        if (dis->CtlID == IDC_SET_OK)
+        {
+            SetDlgDrawOk(dis);
+            return TRUE;
+        }
+        break;
+    }
+
+    case WM_CTLCOLORBTN:
+    {
+        int id = GetDlgCtrlID((HWND)lParam);
+        HBRUSH br = (id == IDC_SET_AUTO || id == IDC_SET_MIN)
+            ? g_hCardBrush : g_hDlgBrush;
+        SetBkColor((HDC)wParam, (id == IDC_SET_AUTO || id == IDC_SET_MIN)
+            ? g_theme->card : g_theme->dialogBg);
+        SetTextColor((HDC)wParam, g_theme->text);
+        return (LRESULT)br;
     }
 
     case WM_CTLCOLORSTATIC:
@@ -3137,8 +3280,20 @@ LRESULT CALLBACK SetDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         {
             SetTextColor((HDC)wParam, g_theme->text);
         }
-        return (LRESULT)g_hDlgBrush;
+        if (id == IDC_SET_CREDITS || id == IDC_SET_EMAIL)
+        {
+            return (LRESULT)g_hDlgBrush;
+        }
+        return (LRESULT)g_hCardBrush;
     }
+
+    case WM_KEYDOWN:
+        if (wParam == VK_RETURN)
+        {
+            OnSetOk(hWnd);
+            return 0;
+        }
+        break;
 
     case WM_NOTIFY:
     {
@@ -3187,7 +3342,7 @@ void ShowSettingsDialog(void)
     DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     DWORD exStyle = WS_EX_DLGMODALFRAME;
     RECT wr;
-    SetRect(&wr, 0, 0, S(520), S(476));
+    SetRect(&wr, 0, 0, SETDLG_CW, SETDLG_CH);
     AdjustWindowRectEx(&wr, style, FALSE, exStyle);
 
     g_hSet = CreateWindowExW(
@@ -5092,6 +5247,13 @@ void ApplyTheme(void)
         DeleteObject(oldDlg);
     }
 
+    HBRUSH oldCard = g_hCardBrush;
+    g_hCardBrush = CreateSolidBrush(g_theme->card);
+    if (oldCard != NULL)
+    {
+        DeleteObject(oldCard);
+    }
+
     if (g_hMain == NULL)
     {
         return;
@@ -6283,6 +6445,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     g_theme = &g_themes[g_set.theme];
     g_hBgBrush = CreateSolidBrush(g_theme->page);
     g_hDlgBrush = CreateSolidBrush(g_theme->dialogBg);
+    g_hCardBrush = CreateSolidBrush(g_theme->card);
 
     /* 单实例 */
     HANDLE hMutex = CreateMutexW(NULL, TRUE, L"TimeManeger_SingleInstance_Mutex_v2");
